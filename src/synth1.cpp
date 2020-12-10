@@ -298,12 +298,12 @@ void R_to_pot(double R, byte &val_pot100K, byte &val_pot10K, byte &val_pot1K, by
   const double R1OOK_total_R_vco0 = 96.77;
   const double R1OK_total_R_vco0 = 10.08;
   const double R1K_total_R_vco0 = 1.055;
-  const double trim_pot_R_vco0 = 2.73;
+  const double trim_pot_R_vco0 = 1.765;
 
   const double R1OOK_total_R_vco1 = 97.26;
   const double R1OK_total_R_vco1 = 10.42;
   const double R1K_total_R_vco1 = 1.033;
-  const double trim_pot_R_vco1 = 2.54;
+  const double trim_pot_R_vco1 = 1.349;
 
 
   //const double wiper_R = 0.12;
@@ -320,14 +320,14 @@ void R_to_pot(double R, byte &val_pot100K, byte &val_pot10K, byte &val_pot1K, by
 
       val_pot100K = 99;
       Rtmp = Rtmp - R1OOK_total_R_vco0;
-      val_pot10K = (byte) constrain(int(Rtmp/(R1OK_total_R_vco0/99 + 0.5)),0,99);
+      val_pot10K = (byte) constrain(int(int(Rtmp/(R1OK_total_R_vco0/99))/5)*5,0,99);
       Rtmp = Rtmp - val_pot10K*(R1OK_total_R_vco0/99);
       val_pot1K = (byte) int(Rtmp/(R1K_total_R_vco0/99) + 0.5);
     }
     else {
-      val_pot100K = (byte) constrain(int(int(Rtmp/(R1OOK_total_R_vco0/99))/10)*10,0,99);
+      val_pot100K = (byte) constrain(int(int(Rtmp/(R1OOK_total_R_vco0/99))/5)*5,0,99);
       Rtmp = Rtmp - val_pot100K*(R1OOK_total_R_vco0/99);
-      val_pot10K = (byte) constrain(int(Rtmp/(R1OK_total_R_vco0/99) + 0.5),0,99);
+      val_pot10K = (byte) constrain(int(int(Rtmp/(R1OK_total_R_vco0/99))/5)*5,0,99);
       Rtmp = Rtmp - val_pot10K*(R1OK_total_R_vco0/99);
       val_pot1K = (byte) int(Rtmp/(R1K_total_R_vco0/99) + 0.5);
       
@@ -382,6 +382,11 @@ void ChangeNote(byte pot_vals[6], byte (&curr_pot_vals)[6], DigiPot *ptr[6], boo
 
   for(m = val_vco*max_pot; m < max_pot + val_vco*max_pot; m++) {
 
+    /*
+    Serial.print("<pot_val:");
+    Serial.print(pot_vals[m]);
+    Serial.print(">");
+    */
     //if (pot_vals[m] < 0) { pot_vals[m] = 0; }
     if (pot_vals[m] > 99) { pot_vals[m] = 99; }
     
@@ -454,6 +459,7 @@ void GenerateArbitraryFreq(byte (&curr_pot_vals)[6], double freq, double duty, d
   Serial.print("<Generate_f2=");
   Serial.print(String(f2,3));
   Serial.print(">");
+  Serial.flush();
   
 
    R_to_pot(Rvco1, R100_1, R10_1, R1_1, 0);
@@ -635,6 +641,7 @@ float MeasureFrequencyDelta(byte totaltime,byte numberofsamples,float tunefreque
     Serial.print("<integrator_temp=");
     Serial.print(String(integrator_temp,3));
     Serial.print(">");
+    Serial.flush();
 
     }
     //delay(1000);
@@ -643,6 +650,7 @@ float MeasureFrequencyDelta(byte totaltime,byte numberofsamples,float tunefreque
     Serial.print("<count2=");
     Serial.print(count2);
     Serial.print(">");
+    Serial.flush();
    
         if (count2 > 0) {
         integrator = integrator/count2;
@@ -696,6 +704,7 @@ float CountFrequencyDelta(byte totaltime,int gatetime,float tunefrequency) {
     Serial.print("<integrator=");
     Serial.print(String(integrator,3));
     Serial.print(">");
+    Serial.flush();
 
   }
 
@@ -728,41 +737,48 @@ unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
 	uint8_t stateMask = (state ? bit : 0);
 
 	unsigned long startMicros = timer2.get_count();
+  unsigned long count = 0;
 
 	// wait for any previous pulse to end
 	while ((*portInputRegister(port) & bit) == stateMask) {
-		if (timer2.get_count() - startMicros > timeout)
-			return 0;
+//		if (timer2.get_count() - startMicros > timeout)
+//			return 0;
+      if(count > timeout) {return 0;}
+      count++;
 	}
-
+  count = 0;
 	// wait for the pulse to start
 	while ((*portInputRegister(port) & bit) != stateMask) {
-		if (timer2.get_count() - startMicros > timeout)
-			return 0;
+		  if(count > timeout) {return 0;}
+      count++;
+    //if (timer2.get_count() - startMicros > timeout)
+			//return 0;    
 	}
-
 	unsigned long start = timer2.get_count();
+  count = 0;
 	// wait for the pulse to stop
 	while ((*portInputRegister(port) & bit) == stateMask) {
-		if (timer2.get_count() - startMicros > timeout)
-			return 0;
+		//if (timer2.get_count() - startMicros > timeout)
+			//return 0;
+      if(count > timeout) {return 0;}
+      count++;
 	}
-	return timer2.get_count() - start;
+	return (timer2.get_count() - start);
 }
 
 
 
-void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, double f2, double &f_err, double &f1_err, double &f2_err) {
+void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, double f2, double &f_meas, double &f1_meas, double &f2_meas) {
 
 
    pinMode(34, INPUT);
-   digitalWrite(34, HIGH);
+   //digitalWrite(34, HIGH);
   //FreqCount.begin(gatetime);
 
     double f_total_measured = 0.0;
     double f1_measured = 0.0;
     double f2_measured = 0.0;
-    
+    double f_err_calc = 0.0;
     
     //float integrator_temp = 0.0;
     unsigned long sumlow = 0;   
@@ -780,12 +796,12 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
   while (count < samplesnumber)
   {
    
-    pulsehigh = pulseInLong2(34,HIGH,20000);
-    pulselow = pulseInLong2(34,LOW,20000);
+    pulsehigh = pulseInLong2(34,HIGH,100000);
+    pulselow = pulseInLong2(34,LOW,100000);
 
     if (pulsehigh != 0)    
     {
-    // average several reading together
+    // average several readings together
     sumhigh += pulsehigh;
     counthigh++;
     }  
@@ -794,14 +810,15 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
     sumlow += pulselow;
     countlow++;
     }
-/*
-    Serial.print("<pulsehigh=");
+    /*
+    Serial.print("<ph=");
     Serial.print(pulsehigh);
     Serial.print(">");
-    Serial.print("<pulselow=");
+    Serial.print("<pl=");
     Serial.print(pulselow);
     Serial.print(">");
- */   
+    Serial.flush();
+    */    
     count++;
     //delay(1000);
     
@@ -814,6 +831,17 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
     f1_measured = 1000000.0/(sumhigh/counthigh);
     f2_measured = 1000000.0/(sumlow/countlow);
 
+  }
+
+    //delay(1000);
+    /*
+    Serial.print("<countlow=");
+    Serial.print(countlow);
+    Serial.print(">");    
+    Serial.print("<counthigh=");
+    Serial.print(counthigh);
+    Serial.print(">");
+    
     Serial.print("<ftm=");
     Serial.print(String(f_total_measured,5));
     Serial.print(">");
@@ -823,20 +851,18 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
     Serial.print("<f2m=");
     Serial.print(String(f2_measured,5));
     Serial.print(">");
-    Serial.flush();
-
-  }
-
-    //delay(1000);
-  
- 
+    Serial.flush();  
+    */
     
-  f_err = f_total_measured - tunefrequency;
-  f1_err = f1_measured - f1;
-  f2_err = f2_measured - f2;
-        
+  //f_err = f_total_measured - tunefrequency;
+  //f1_err = f1_measured - f1;
+  //f2_err = f2_measured - f2;
+  //f_meas = f_total_measured;
+  f1_meas = f1;
+  f2_meas = f2;      
   //FreqCount.end();
-
+  f_err_calc = tunefrequency*1.55005013e-03 -1.45261187e-01;
+  f_meas = f_total_measured + f_err_calc;
   //return integrator;
 }
 void Rise() 
@@ -1068,8 +1094,8 @@ void SingleCountFrequencyDelta(byte samplesnumber,double fcomp, double &fcomp_er
    
     f_measured = 1000000.0/(sum/count);
 
-    DebugPrint("f_measured",f_measured,0);
-    DebugPrint("f_comp",fcomp,0);
+    DebugPrint("f_measured",f_measured,2);
+    DebugPrint("f_comp",fcomp,2);
     /*
     Serial.print("<f_measured=");
     Serial.print(String(f_measured,3));
@@ -1126,7 +1152,7 @@ void AutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool level
   int pot_val_change = -1;
   double pot_val_temp = 0.0;
   double dev_cents = 0.0;
-  const double tune_thresh = 3.0;
+  const double tune_thresh = 1.0;
   max_pot = 3;
  
   int  m = val_vco*max_pot + max_pot -1;
@@ -1698,7 +1724,7 @@ while(!tuned)
         int k = 0;
         for (m=val_vco*max_pot;m<val_vco*max_pot + max_pot;m++) 
         {
-          pot_val_change = states[best_index][m - val_vco*max_pot] - curr_pot_vals[m];
+          pot_val_change = int(states[best_index][m - val_vco*max_pot]) - int(curr_pot_vals[m]);
           if (pot_val_change > 0) 
           { 
             curr_pot_vals[m] += pot_val_change;
@@ -1758,8 +1784,6 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
     return;
   }
   
-  DebugPrint("FREQ",double(freq),0);
-  DebugPrint("MAXFREQ",double(maxfreq),0);
 
   if (freq == maxfreq) 
   {
@@ -1804,7 +1828,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
   double pot_val_temp2 = 0.0;
   
   double dev_cents = 0.0;
-  const double tune_thresh = 3.0;
+  double dev_cents_back = 0.0;
+  const double tune_thresh = 1.0;
   
  
   m = val_vco*max_pot + max_pot -1;
@@ -1833,13 +1858,19 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
   dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
 
   pot_val_change = int(integrator/fabs(integrator));
-  DebugPrint("INIT_INTEGRATOR",double(integrator),2);
-  
+  DebugPrint("INIT_INTEGRATOR",double(integrator),0);
+  PrintDigiPot(curr_pot_vals,val_vco);
+
+
   while(!tuned) 
   {
     if (num_integrations == max_integrations) 
     { 
       tuned = true;
+      states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
+      states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
+      states[num_integrations][2] = curr_pot_vals[val_vco*max_pot+2];
+      states_integrator[num_integrations] = integrator;
       break;
     }
     if (fabs(dev_cents) <= tune_thresh) 
@@ -1875,9 +1906,9 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
         DebugPrint("BOUND_LIMIT_DEC_M",double(curr_pot_vals[m]),2);
       }
       
-      DebugPrint("HIGH_POT_IDX",double(m),2);
-      DebugPrint("HIGH_POT_BEFORE",curr_pot_vals[m],2);
-      DebugPrint("HIGH_INT_BEFORE",double(integrator),2);
+      DebugPrint("HIGH_POT_IDX",double(m),0);
+      DebugPrint("HIGH_POT_BEFORE",curr_pot_vals[m],0);
+      DebugPrint("HIGH_INT_BEFORE",double(integrator),0);
       
       curr_pot_vals[m] += pot_val_change;
     
@@ -1890,32 +1921,33 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
         ptr[m]->decrease(abs(pot_val_change)); 
       }
     
-      integrator_1 = integrator;  
+      integrator_1 = integrator;
+      dev_cents_back = dev_cents; 
       SingleCountFrequencyDelta(50,freq,dintegrator,level); 
       integrator = (float) dintegrator;
       pot_val_change = int(integrator/fabs(integrator));
       dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
       
-      DebugPrint("HIGH_POT_IDX",double(m),2); 
-      DebugPrint("HIGH_POT_AFTER ",curr_pot_vals[m],2);
-      DebugPrint("HIGH_INT_AFTER ",double(integrator),2);
-      DebugPrint("POT_VAL_AFTER  ",pot_val_change,2);
+      DebugPrint("HIGH_POT_IDX",double(m),0); 
+      DebugPrint("HIGH_POT_AFTER ",curr_pot_vals[m],0);
+      DebugPrint("HIGH_INT_AFTER ",double(integrator),0);
+      DebugPrint("POT_VAL_AFTER  ",pot_val_change,0);
 
-      if (  int(integrator/fabs(integrator)) != int(integrator_1/fabs(integrator_1)) )
+      if (int(integrator/fabs(integrator)) != int(integrator_1/fabs(integrator_1)))
       {
-        DebugPrint("ZERO_CROSS",double(curr_pot_vals[m]),2);
+        DebugPrint("ZERO_CROSS",double(curr_pot_vals[m]),0);
 
         // zero cross, check for change room in up or down direction for med/low pots.
         bias = 5000 - (100*(curr_pot_vals[m-1]) + curr_pot_vals[m-2]*10);  
         // approx. bias in ohms
         // if bias positive, there is room for going up (decrease freq)
         // if bias negative, there is room for going down (increase freq)
-        pot_val_temp = d_hertz_to_R(freq,val_vco)*integrator*1000; // * 1000 to convert kOhms in Ohms
-        pot_val_temp2 = d_hertz_to_R(freq,val_vco)*integrator_1*1000; // * 1000 to convert kOhms in Ohms
+        pot_val_temp = -d_hertz_to_R(freq,val_vco)*integrator*1000; // * 1000 to convert kOhms in Ohms
+        pot_val_temp2 = -d_hertz_to_R(freq,val_vco)*integrator_1*1000; // * 1000 to convert kOhms in Ohms
 
-        DebugPrint("POT_VAL_TEMP", double(pot_val_temp),2);
-        DebugPrint("POT_VAL_TEMP2", double(pot_val_temp2),2);
-        DebugPrint("BIAS", double(bias),2);
+        DebugPrint("POT_VAL_TEMP", double(pot_val_temp),0);
+        DebugPrint("POT_VAL_TEMP2", double(pot_val_temp2),0);
+        DebugPrint("BIAS", double(bias),0);
                 
         // pot_val_temp approx change in R (ohms) required.
         if (bias > 0)
@@ -1926,16 +1958,17 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
             {
               // bias is higher than pot_val temp, there is room for change using integrator
               // change nothing
-              DebugPrint("CHG_NOTHING_VAL1", double(pot_val_temp),2);
-              DebugPrint("CHG_NOTHING_BIAS1", double(bias),2);
+              DebugPrint("CHG_NOTHING_VAL1", double(pot_val_temp),0);
+              DebugPrint("CHG_NOTHING_BIAS1", double(bias),0);
                 
             }
             else if (bias < pot_val_temp) 
             {
 
-              DebugPrint("REVERT_VAL2", double(pot_val_temp),2);
-              DebugPrint("REVERT_BIAS2", double(bias),2);
+              DebugPrint("REVERT_VAL2", double(pot_val_temp),0);
+              DebugPrint("REVERT_BIAS2", double(bias),0);
               integrator = integrator_1;
+              dev_cents = dev_cents_back;
               curr_pot_vals[m] += pot_val_change;
               if (pot_val_change > 0) 
               { 
@@ -1952,9 +1985,10 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
             if (bias > pot_val_temp2) // then pot_val_temp2 > 0, because of sign change
             {
 
-              DebugPrint("REVERT_VAL3", double(pot_val_temp2),2);
-              DebugPrint("REVERT_BIAS3", double(bias),2);
+              DebugPrint("REVERT_VAL3", double(pot_val_temp2),0);
+              DebugPrint("REVERT_BIAS3", double(bias),0);
               integrator = integrator_1;
+              dev_cents = dev_cents_back;
               curr_pot_vals[m] += pot_val_change;
               if (pot_val_change > 0) 
               { 
@@ -1970,8 +2004,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
               // bias is lower than pot_val temp, there is no room for change using integrator_1
               // change nothing
 
-              DebugPrint("CHG_NOTHING_VAL4", double(pot_val_temp2),2);
-              DebugPrint("CHG_NOTHING_BIAS4", double(bias),2);
+              DebugPrint("CHG_NOTHING_VAL4", double(pot_val_temp2),0);
+              DebugPrint("CHG_NOTHING_BIAS4", double(bias),0);
 
             }
           }
@@ -1986,15 +2020,16 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
             {
               // bias is lower than pot_val temp, there is room for change using integrator
               // change nothing
-              DebugPrint("CHG_NOTHING_VAL5", double(pot_val_temp),2);
-              DebugPrint("CHG_NOTHING_BIAS5", double(bias),2);
+              DebugPrint("CHG_NOTHING_VAL5", double(pot_val_temp),0);
+              DebugPrint("CHG_NOTHING_BIAS5", double(bias),0);
 
             }
             else if (bias > pot_val_temp)
             {
 
-              DebugPrint("REVERT_VAL6", double(pot_val_temp),2);
-              DebugPrint("REVERT_BIAS6", double(bias),2);
+              DebugPrint("REVERT_VAL6", double(pot_val_temp),0);
+              DebugPrint("REVERT_BIAS6", double(bias),0);
+              dev_cents = dev_cents_back;
               integrator = integrator_1;
               curr_pot_vals[m] += pot_val_change;
               if (pot_val_change > 0) 
@@ -2013,10 +2048,11 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
             {
               // bias is lower than pot_val temp2, there is room for change using integrator_1
               // revert
-              DebugPrint("REVERT_VAL7", double(pot_val_temp2),2);
-              DebugPrint("REVERT_BIAS7", double(bias),2);
+              DebugPrint("REVERT_VAL7", double(pot_val_temp2),0);
+              DebugPrint("REVERT_BIAS7", double(bias),0);
 
               integrator = integrator_1;
+              dev_cents = dev_cents_back;
               curr_pot_vals[m] += pot_val_change;
               if (pot_val_change > 0) 
               { 
@@ -2032,13 +2068,12 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
             {
               // bias is higher thant pot_val_temp2, no room for change using integrator_1, use integrator
               // change nothing
-              DebugPrint("CHG_NOTHING_VAL8", double(pot_val_temp),2);
-              DebugPrint("CHG_NOTHING_BIAS8", double(bias),2);
+              DebugPrint("CHG_NOTHING_VAL8", double(pot_val_temp),0);
+              DebugPrint("CHG_NOTHING_BIAS8", double(bias),0);
 
             }
-          }
-          
-        }
+          }  
+        } // else if bias end
         
         // zero cross, is integrator or integrator_1 closest ?
         /*
@@ -2099,10 +2134,9 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
       states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
       states[num_integrations][2] = curr_pot_vals[val_vco*max_pot+2];
-      states_integrator[num_integrations] = integrator;
-          
-      
-      num_integrations++;
+      states_integrator[num_integrations] = integrator;  
+      num_integrations++; // increment num_integrations high pot
+      DebugPrint("NUM_INTEGRATIONS_INCREMENTED",double(num_integrations),0);
     
     } // end high pot check.
     
@@ -2112,13 +2146,21 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       integrator = (float) dintegrator;
       dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
       rstep = pow(10,m - max_pot*val_vco +1);
-      //pot_val_temp = ((1/0.28e-6)/(freq*freq*rstep))*integrator;
-      pot_val_temp = -(d_hertz_to_R(freq,val_vco)*integrator*1000/rstep); // * 1000 to convert kOhms in Ohms
+      //pot_val_temp = ((1/0.28e-6)/(freq*freq*rstep))*integrator;  
+      if (m == max_pot*val_vco)
+      { 
+        pot_val_temp = -(d_hertz_to_R(freq,val_vco)*integrator*1000/rstep)/2;
+      }
+      else
+      {
+        pot_val_temp = -(d_hertz_to_R(freq,val_vco)*integrator*1000/rstep);
+      }
+       // * 1000 to convert kOhms in Ohms
      
       //pot_val_temp = ((1/0.28e-6)/(freq*freq*10))*integrator;
       curr_pot_val_bck = curr_pot_vals[m];
       
-      DebugPrint("LOW_POT_IDX",double(m),2);
+      DebugPrint("LOW_POT_IDX_BEFORE",double(m),0);
       DebugPrint("LOW_POT_BEFORE",curr_pot_vals[m],2);
       DebugPrint("LOW_INT_BEFORE",double(integrator),2);
    
@@ -2127,8 +2169,12 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       {
         if (m == val_vco*max_pot) 
         { 
-          DebugPrint("OUT_OF_BOUNDS_LOW_POT",double(curr_pot_vals[m]),2);
-          tuned = true; 
+          DebugPrint("OUT_OF_BOUNDS_LOW_POT",double(curr_pot_vals[m]),0);
+          tuned = true;
+          states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
+          states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
+          states[num_integrations][2] = curr_pot_vals[val_vco*max_pot+2];
+          states_integrator[num_integrations] = integrator;
           break;
         }
         m--;
@@ -2138,8 +2184,12 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       {
         if (m == val_vco*max_pot) 
         { 
-          DebugPrint("OUT_OF_BOUNDS_LOW_POT",double(curr_pot_vals[m]),2);
-          tuned = true; 
+          DebugPrint("OUT_OF_BOUNDS_LOW_POT",double(curr_pot_vals[m]),0);
+          tuned = true;
+          states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
+          states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
+          states[num_integrations][2] = curr_pot_vals[val_vco*max_pot+2];
+          states_integrator[num_integrations] = integrator;
           break;
         }
         m--;
@@ -2160,14 +2210,15 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
         curr_pot_vals[m] = constrain( curr_pot_vals[m] + pot_val_change,0,99);       
       }
       
-      integrator_1 = integrator;  
+      integrator_1 = integrator;
+      dev_cents = dev_cents_back;  
       SingleCountFrequencyDelta(50,freq,dintegrator,level); 
       integrator = (float) dintegrator;
       
-      //pot_val_change = int(integrator/fabs(integrator));
+      pot_val_change = int(integrator/fabs(integrator));
       dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
       
-      DebugPrint("LOW_POT_IDX",double(m),2);
+      DebugPrint("LOW_POT_IDX_AFTER",double(m),0);
       DebugPrint("LOW_POT_AFTER",curr_pot_vals[m],2);
       DebugPrint("LOW_INT_AFTER",double(integrator),2);
       
@@ -2176,35 +2227,184 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
         // zero cross, is integrator or integrator_1 closest ?
         DebugPrint("ZERO_CROSS",double(curr_pot_vals[m]),0);
 
-        if (fabs(integrator) <= fabs(integrator_1))
+        if (m == max_pot*val_vco +1) 
         {
-          // Change nothing, current value closer.
-          DebugPrint("CHANGE_NOTHING",double(curr_pot_vals[m]),2);
+          pot_val_temp = -(d_hertz_to_R(freq,val_vco)*integrator*1000/rstep); // * 1000 to convert kOhms in Ohms
+          pot_val_temp2 = -(d_hertz_to_R(freq,val_vco)*integrator_1*1000/rstep); // * 1000 to convert kOhms in Ohms
+          bias = 500 - (10*(curr_pot_vals[m-1]));
 
-        }
-        else
+          DebugPrint("POT_VAL_TEMP", double(pot_val_temp),0);
+          DebugPrint("POT_VAL_TEMP2", double(pot_val_temp2),0);
+          DebugPrint("BIAS", double(bias),0);
+  
+          // pot_val_temp approx change in R (ohms) required.
+          if (bias > 0)
+          {
+            if  (pot_val_temp > 0)
+            {
+              if (bias > pot_val_temp)
+              {
+                // bias is higher than pot_val temp, there is room for change using integrator
+                // change nothing
+                DebugPrint("CHG_NOTHING_VAL1", double(pot_val_temp),0);
+                DebugPrint("CHG_NOTHING_BIAS1", double(bias),0);
+                  
+              }
+              else if (bias < pot_val_temp) 
+              {
+
+                DebugPrint("REVERT_VAL2", double(pot_val_temp),0);
+                DebugPrint("REVERT_BIAS2", double(bias),0);
+                integrator = integrator_1;
+                dev_cents = dev_cents_back;
+                curr_pot_vals[m] += pot_val_change;
+                if (pot_val_change > 0) 
+                { 
+                  ptr[m]->increase(pot_val_change);
+                }
+                else if (pot_val_change < 0)
+                { 
+                  ptr[m]->decrease(abs(pot_val_change)); 
+                }
+              }           
+            }
+            else if (pot_val_temp < 0)// pot_val_temp < 0
+            {
+              if (bias > pot_val_temp2) // then pot_val_temp2 > 0, because of sign change
+              {
+
+                DebugPrint("REVERT_VAL3", double(pot_val_temp2),0);
+                DebugPrint("REVERT_BIAS3", double(bias),0);
+                integrator = integrator_1;
+                dev_cents = dev_cents_back;
+                curr_pot_vals[m] += pot_val_change;
+                if (pot_val_change > 0) 
+                { 
+                  ptr[m]->increase(pot_val_change);
+                }
+                else if (pot_val_change < 0)
+                { 
+                  ptr[m]->decrease(abs(pot_val_change)); 
+                }
+              }
+              else if (bias < pot_val_temp2)
+              {
+                // bias is lower than pot_val temp, there is no room for change using integrator_1
+                // change nothing
+
+                DebugPrint("CHG_NOTHING_VAL4", double(pot_val_temp2),0);
+                DebugPrint("CHG_NOTHING_BIAS4", double(bias),0);
+
+              }
+            }
+            
+          }
+          else if (bias < 0)
+          {
+
+            if  (pot_val_temp < 0)
+            {
+              if (bias < pot_val_temp)
+              {
+                // bias is lower than pot_val temp, there is room for change using integrator
+                // change nothing
+                DebugPrint("CHG_NOTHING_VAL5", double(pot_val_temp),0);
+                DebugPrint("CHG_NOTHING_BIAS5", double(bias),0);
+
+              }
+              else if (bias > pot_val_temp)
+              {
+
+                DebugPrint("REVERT_VAL6", double(pot_val_temp),0);
+                DebugPrint("REVERT_BIAS6", double(bias),0);
+                integrator = integrator_1;
+                dev_cents = dev_cents_back;
+                curr_pot_vals[m] += pot_val_change;
+                if (pot_val_change > 0) 
+                { 
+                  ptr[m]->increase(pot_val_change);
+                }
+                else if (pot_val_change < 0)
+                { 
+                  ptr[m]->decrease(abs(pot_val_change)); 
+                }
+              }            
+            }
+            else if (pot_val_temp > 0)
+            {
+              if (bias < pot_val_temp2) // then pot_val_temp2 < 0, because of sign change
+              {
+                // bias is lower than pot_val temp2, there is room for change using integrator_1
+                // revert
+                DebugPrint("REVERT_VAL7", double(pot_val_temp2),0);
+                DebugPrint("REVERT_BIAS7", double(bias),0);
+
+                integrator = integrator_1;
+                dev_cents = dev_cents_back;
+                curr_pot_vals[m] += pot_val_change;
+                if (pot_val_change > 0) 
+                { 
+                  ptr[m]->increase(pot_val_change);
+                }
+                else if (pot_val_change < 0)
+                { 
+                  ptr[m]->decrease(abs(pot_val_change)); 
+                }
+
+              }
+              else if (bias > pot_val_temp2)
+              {
+                // bias is higher thant pot_val_temp2, no room for change using integrator_1, use integrator
+                // change nothing
+                DebugPrint("CHG_NOTHING_VAL8", double(pot_val_temp),0);
+                DebugPrint("CHG_NOTHING_BIAS8", double(bias),0);
+
+              }
+            }  
+          } // else if bias end        
+        } // end zero cross for middle pot m
+     
+        if (m == max_pot*val_vco)
         {
-            // revert
-          pot_val_change = curr_pot_val_bck - int(curr_pot_vals[m]);
-          integrator = integrator_1;
-          
-          if (pot_val_change > 0) 
-          { 
-            ptr[m]->increase(pot_val_change); 
-          }
-          else if (pot_val_change < 0)
-          { 
-            ptr[m]->decrease(abs(pot_val_change)); 
-          }
+          if (fabs(integrator) <= fabs(integrator_1))
+          {
+            // Change nothing, current value closer.
+            DebugPrint("CHANGE_NOTHING",double(curr_pot_vals[m]),0);
 
-          DebugPrint("REVERSE VAL",double(curr_pot_vals[m]),2);
-        }
-        if (m == (val_vco*max_pot)) 
-        { 
+          }
+          else
+          {
+              // revert
+            pot_val_change = curr_pot_val_bck - int(curr_pot_vals[m]);
+            curr_pot_vals[m] = curr_pot_val_bck;
+            integrator = integrator_1;
+            dev_cents = dev_cents_back;
+            
+            if (pot_val_change > 0) 
+            { 
+              ptr[m]->increase(pot_val_change); 
+            }
+            else if (pot_val_change < 0)
+            { 
+              ptr[m]->decrease(abs(pot_val_change)); 
+            }
+
+            DebugPrint("REVERT VAL",double(curr_pot_vals[m]),0);
+          }
+        
           DebugPrint("LAST_POT_TUNED",double(curr_pot_vals[m]),0);
-          tuned = true; 
+          tuned = true;
+          states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
+          states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
+          states[num_integrations][2] = curr_pot_vals[val_vco*max_pot+2];
+          states_integrator[num_integrations] = integrator;
           break;       
+ 
         }
+
+        //if (m == (val_vco*max_pot)) 
+        //{ 
+        //}
         // we decrease m and reset integrator count for this m
         m--;
         integrator_count = 0;
@@ -2219,15 +2419,15 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
       states[num_integrations][2] = curr_pot_vals[val_vco*max_pot+2];
       states_integrator[num_integrations] = integrator;
-      num_integrations++; //increasing num_integrations
-      
+      num_integrations++; //increasing num_integrations low pot
+      DebugPrint("NUM_INTEGRATIONS_INCREMENTED",double(num_integrations),0);
       // check bounds.
     } // end low pot check             
   } // end while tuned
 
 min_integrator = fabs(states_integrator[0]);
         
-  for (p=0;p<num_integrations;p++) 
+  for (p=0;p<=num_integrations;p++) 
   {
 
 
@@ -2273,23 +2473,23 @@ min_integrator = fabs(states_integrator[0]);
     if (pot_val_change > 0) 
     { 
       curr_pot_vals[m] += pot_val_change;
-      for(k=0;k<pot_val_change;k++) 
-      {
+      //for(k=0;k<pot_val_change;k++) 
+      //{
         //delay(10);
-        DebugPrint("POT_LAST_CHANGE",double(1),2);
-        ptr[m]->increase(1);
-      }
+      DebugPrint("POT_LAST_CHANGE",double(pot_val_change),2);
+      ptr[m]->increase(pot_val_change);
+      //}
         
     }
     else if (pot_val_change < 0) 
     {
       curr_pot_vals[m] += pot_val_change;
-      for(k=0;k<abs(pot_val_change);k++) 
-      {
+      //for(k=0;k<abs(pot_val_change);k++) 
+      //{
         //delay(10);
-        ptr[m]->decrease(1);
-        DebugPrint("POT_LAST_CHANGE",double(-1),2);
-      }
+      ptr[m]->decrease(abs(pot_val_change));
+      DebugPrint("POT_LAST_CHANGE",double(pot_val_change),2);
+      //}
                   
     }
       
@@ -2584,6 +2784,7 @@ void setup()
       Serial.print(",");
       Serial.print(pot_vals[k][0]);
       Serial.print("]>");
+      Serial.flush();
     
       /*
       // not required for python curve fitting script 
@@ -2601,9 +2802,9 @@ void setup()
 
   double f1;
   double f2;
-  double f_err;
-  double f1_err;
-  double f2_err;
+  double f_meas;
+  double f1_meas;
+  double f2_meas;
   bool level = true;
   float duty;
   bool arb_vcosel = false;
@@ -2617,6 +2818,7 @@ void setup()
     GenerateArbitraryFreq(midi_to_pot,400.0, 0.5, f1, f2);
     delay(120000);
     Serial.print("<generating freq end>");
+    Serial.flush();
     return;
   }
 
@@ -2651,6 +2853,7 @@ void setup()
   Serial.print(midi_to_pot[vcosel*max_pot +1]);
   Serial.print(midi_to_pot[vcosel*max_pot]);
   Serial.print(">");
+  Serial.flush();
 
 
   notefreq = pgm_read_float(&(notes_freq[notestart-1]));
@@ -2698,11 +2901,12 @@ void setup()
 
       f1 = 0.0;
       f2 = 0.0;
-      f_err = 0.0;
-      f1_err = 0.0;
-      f2_err = 0.0;
+      f_meas = 0.0;
+      f1_meas = 0.0;
+      f2_meas = 0.0;
       duty = 0.75;
-
+      MaxVcoPots(pots,midi_to_pot,0);
+      MaxVcoPots(pots,midi_to_pot,1);
       GenerateArbitraryFreq(midi_to_pot,notefreq, 0.75, f1, f2);
       //test delay(2000);
       Serial.print("<Generated_f1=");
@@ -2713,23 +2917,32 @@ void setup()
       Serial.print(">");
       Serial.flush();
       
-      CountFrequencyDelta2(50,notefreq,f1,f2,f_err,f1_err,f2_err);
+      //digitalWrite(vco_pin,0);
+      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas);
       //if (duty > 0.5) { level = !level; arb_vcosel = !arb_vcosel;}
       
       // f1 = high , f2 = low
       NewAutoTune(pots,midi_to_pot,f1,1,0);
       // test delay(100);
-      CountFrequencyDelta2(50,notefreq,f1,f2,f_err,f1_err,f2_err);
+      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas);
       
       NewAutoTune(pots,midi_to_pot,f2,0,1);
       // test delay(100);
-      CountFrequencyDelta2(50,notefreq,f1,f2,f_err,f1_err,f2_err);
+      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas);
       
       //integrator = CountFrequencyDelta(6,1000,notefreq);
-      /*
-      Serial.print("<ferr=");
-      Serial.print(String(f_err,3));
+      
+      Serial.print("<fmeas=");
+      Serial.print(String(f_meas,3));
       Serial.print(">");
+      Serial.print("<f1=");
+      Serial.print(String(f1,3));
+      Serial.print(">");
+      Serial.print("<f2=");
+      Serial.print(String(f2,3));
+      Serial.print(">");
+      Serial.flush();
+      /*
       Serial.print("<f1err=");
       Serial.print(String(f1_err,3));
       Serial.print(">");
