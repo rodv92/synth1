@@ -768,7 +768,7 @@ unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
 
 
 
-void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, double f2, double &f_meas, double &f1_meas, double &f2_meas) {
+void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, double f2, double &f_meas, double &f1_meas, double &f2_meas, double &f_err) {
 
 
    pinMode(34, INPUT);
