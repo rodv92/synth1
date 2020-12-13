@@ -605,7 +605,7 @@ for(vcosel = 0; vcosel < 2; vcosel++)
 
 } 
 
-
+/*
 float MeasureFrequencyDelta(byte totaltime,byte numberofsamples,float tunefrequency) {
 
 
@@ -664,8 +664,8 @@ float MeasureFrequencyDelta(byte totaltime,byte numberofsamples,float tunefreque
 
         return integrator;
 }
-
-
+*/
+/*
 float CountFrequencyDelta(byte totaltime,int gatetime,float tunefrequency) {
 
 
@@ -718,6 +718,7 @@ float CountFrequencyDelta(byte totaltime,int gatetime,float tunefrequency) {
 
   return integrator;
 }
+*/
 
 /* Measures the length (in microseconds) of a pulse on the pin; state is HIGH
  * or LOW, the type of pulse to measure.  Works on pulses from 2-3 microseconds
@@ -736,7 +737,7 @@ unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
 	uint8_t port = digitalPinToPort(pin);
 	uint8_t stateMask = (state ? bit : 0);
 
-	unsigned long startMicros = timer2.get_count();
+	//unsigned long startMicros = timer2.get_count();
   unsigned long count = 0;
 
 	// wait for any previous pulse to end
@@ -766,6 +767,103 @@ unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
 	return (timer2.get_count() - start);
 }
 
+void CountFrequencyDeltaGlobal(byte samplesnumber,float tunefrequency, double &f_err) 
+{
+
+
+  pinMode(34, INPUT);
+  //digitalWrite(34, HIGH);
+  //FreqCount.begin(gatetime);
+
+  double f_total_measured = 0.0;
+  double f_meas = 0.0;
+  double f_err_calc = 0.0;
+  
+  //float integrator_temp = 0.0;
+  unsigned long sumlow = 0;   
+  unsigned long sumhigh = 0;   
+  
+
+  byte counthigh = 0;
+  byte countlow = 0;
+  byte count = 0;
+  
+  unsigned long pulsehigh = 0;
+  unsigned long pulselow = 0;
+
+  timer2.setup();
+  
+  while (count < samplesnumber)
+  {
+   
+    pulsehigh = pulseInLong2(34,HIGH,100000);
+    pulselow = pulseInLong2(34,LOW,100000);
+
+    if (pulsehigh != 0)    
+    {
+      // average several readings together
+      sumhigh += pulsehigh;
+      counthigh++;
+    }  
+    if (pulselow != 0)
+    {
+      sumlow += pulselow;
+      countlow++;
+    }
+    /*
+    Serial.print("<ph=");
+    Serial.print(pulsehigh);
+    Serial.print(">");
+    Serial.print("<pl=");
+    Serial.print(pulselow);
+    Serial.print(">");
+    Serial.flush();
+    */    
+    count++;
+    //delay(1000);
+    
+  }
+  //interrupts();
+  timer2.unsetup();
+  
+  if ((countlow >0) && (counthigh>0))
+  {
+    f_total_measured = 2000000.0/((sumhigh/counthigh) + (sumlow/countlow));
+    f_err_calc = tunefrequency*1.55005013e-03 -1.45261187e-01;
+    f_meas = f_total_measured + f_err_calc;
+  
+    f_err = f_meas - tunefrequency;
+  }
+
+    //delay(1000);
+    /*
+    Serial.print("<countlow=");
+    Serial.print(countlow);
+    Serial.print(">");    
+    Serial.print("<counthigh=");
+    Serial.print(counthigh);
+    Serial.print(">");
+    */
+    Serial.print("<ftm=");
+    Serial.print(String(f_total_measured,5));
+    Serial.print(">");
+    /*
+    Serial.print("<f1m=");
+    Serial.print(String(f1_measured,5));
+    Serial.print(">");
+    Serial.print("<f2m=");
+    Serial.print(String(f2_measured,5));
+    Serial.print(">");
+    Serial.flush();  
+    */
+    
+    //f_err = f_total_measured - tunefrequency;
+    //f1_err = f1_measured - f1;
+    //f2_err = f2_measured - f2;
+    //f_meas = f_total_measured;
+    //return integrator;
+
+}
 
 
 void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, double f2, double &f_meas, double &f1_meas, double &f2_meas, double &f_err) {
@@ -828,9 +926,15 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
   if ((countlow >0) && (counthigh>0))
   {
     f_total_measured = 2000000.0/((sumhigh/counthigh) + (sumlow/countlow));
+    f_err_calc = tunefrequency*1.55005013e-03 -1.45261187e-01;
+    f_meas = f_total_measured + f_err_calc;
+  
     f1_measured = 1000000.0/(sumhigh/counthigh);
     f2_measured = 1000000.0/(sumlow/countlow);
-
+    f1_meas = f1_measured; 
+    f2_meas = f2_measured;     
+  //FreqCount.end();
+    f_err = tunefrequency - f_meas;
   }
 
     //delay(1000);
@@ -841,10 +945,11 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
     Serial.print("<counthigh=");
     Serial.print(counthigh);
     Serial.print(">");
-    
+    */
     Serial.print("<ftm=");
-    Serial.print(String(f_total_measured,5));
+    Serial.print(String(f_meas,5));
     Serial.print(">");
+    /*
     Serial.print("<f1m=");
     Serial.print(String(f1_measured,5));
     Serial.print(">");
@@ -853,274 +958,174 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
     Serial.print(">");
     Serial.flush();  
     */
-    
-  //f_err = f_total_measured - tunefrequency;
-  //f1_err = f1_measured - f1;
-  //f2_err = f2_measured - f2;
-  //f_meas = f_total_measured;
-  f1_meas = f1;
-  f2_meas = f2;      
-  //FreqCount.end();
-  f_err_calc = tunefrequency*1.55005013e-03 -1.45261187e-01;
-  f_meas = f_total_measured + f_err_calc;
-  //return integrator;
 }
-void Rise() 
+
+void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_component, double &f_global_err, double &f_component_err, bool low_or_high, bool globaltune) 
 {
-RiseCount = timer2.get_count();
-}
-void Fall()
-{
-FallCount = timer2.get_count();
-}
-
-
-void CountFrequencyDeltaNew2(byte samplesnumber,float tunefrequency, double f1, double f2, double &f_err, double &f1_err, double &f2_err) {
-
-  const byte interruptPinRise = 18;
-  const byte interruptPinFall = 19;
+  pinMode(34, INPUT);
   
-  pinMode(interruptPinRise, INPUT);
-  pinMode(interruptPinFall, INPUT);
-
-  RiseCount = 0;
-  FallCount = 0;
+  double f_total_measured = 0.0;
+  double f_total_measured_compensated = 0.0;
+  //double f1_measured = 0.0;
+  //double f2_measured = 0.0;
+  double f_err_calc = 0.0;
   
-  timer2.setup();
-
-  attachInterrupt(digitalPinToInterrupt(interruptPinRise), Rise, HIGH);
-  attachInterrupt(digitalPinToInterrupt(interruptPinFall), Fall, LOW);
+  //float integrator_temp = 0.0;
+  unsigned long sumlow = 0;   
+  unsigned long sumhigh = 0;   
+  unsigned long sum = 0;   
   
-  //FreqCount.begin(gatetime);
 
-    double f_total_measured = 0.0;
-    double f1_measured = 0.0;
-    double f2_measured = 0.0;
+  byte counthigh = 0;
+  byte countlow = 0;
+  byte count = 0;
+  
+  unsigned long pulsehigh = 0;
+  unsigned long pulselow = 0;
+  unsigned long pulse = 0;
+  
+  ///////
+  double f_measured = 0.0;
     
-    
-    //float integrator_temp = 0.0;
-    unsigned long sumlow = 0;   
-    unsigned long sumhigh = 0;   
-    unsigned long prevRiseCount;
-    unsigned long prevFallCount; 
-    unsigned long currRiseCount;
-    unsigned long currFallCount; 
 
-
-    byte count = 0;
     
-    unsigned long PulseHighSum = 0;
-    unsigned long PulseLowSum = 0;
-    unsigned long PulseHighCount = 0;
-    unsigned long PulseLowCount = 0;
-    
-    //noInterrupts();
-
-  while (count < samplesnumber)
+  if (globaltune)
   {
-      
-    while ((PulseHighCount == 0) && (PulseLowCount == 0))
+    timer2.setup();
+    while (count < samplesnumber)
     {
-      //Serial.print("<PULSEWAIT>");  
-      //delay(100);
-      if ((RiseCount != 0) && (FallCount != 0))
+    
+      pulsehigh = pulseInLong2(34,HIGH,100000);
+      pulselow = pulseInLong2(34,LOW,100000);
+
+      if (pulsehigh != 0)    
       {
-        /*       
-        */
-        //delay(1000);
+      // average several readings together
+      sumhigh += pulsehigh;
+      counthigh++;
+      }  
+      if (pulselow != 0)
+      {
+      sumlow += pulselow;
+      countlow++;
+      }
+      /*
+      Serial.print("<ph=");
+      Serial.print(pulsehigh);
+      Serial.print(">");
+      Serial.print("<pl=");
+      Serial.print(pulselow);
+      Serial.print(">");
+      Serial.flush();
+      */    
+      count++;
+      //delay(1000);
       
-        // average several reading together
-        currFallCount = FallCount;
-        currRiseCount = RiseCount;
-        prevFallCount = currFallCount;
-        prevRiseCount = currRiseCount;
-        
-        while (true)
-        {
-          currRiseCount = RiseCount;
-          currFallCount = FallCount;
-          prevFallCount = currFallCount;
-        
-          if (currRiseCount > prevRiseCount)
-          {
-            while (true)
-            {
-            currFallCount = FallCount;
-            if ((currFallCount > prevFallCount) && (currFallCount > currRiseCount))
-              {
-                PulseHighCount = currFallCount - currRiseCount;
-                break;
-              }
+    } // end while (count < samplesnumber)
 
-            }
-            break;
-          }
-        }
-        
-        
-        prevRiseCount = RiseCount;
-        prevFallCount = FallCount;
-        
-        while (true)
-        {
-          currFallCount = FallCount;
-          currRiseCount = RiseCount;
-          prevRiseCount = currRiseCount;
+    timer2.unsetup();
+    if ((countlow >0) && (counthigh>0))
+    {
+      if (low_or_high)
+      {
+        f_measured = 1000000.0/(sumhigh/counthigh);        
+      }
+      else
+      {
+        f_measured = 1000000.0/(sumlow/countlow);
+      }
+      /*
+      Serial.print("<f_measured=");
+      Serial.print(String(f_measured,3));
+      Serial.print(">");
+      Serial.print("<f_component=");
+      Serial.print(String(f_component,3));
+      Serial.print(">");
+      Serial.flush();
+      */
+      f_component_err = f_measured - f_component;
 
-          if (currFallCount > prevFallCount)
-          {
-            while (true)
-            {
-            currRiseCount = RiseCount;
-            if ((currRiseCount > prevRiseCount) && (currRiseCount > currFallCount))
-              {
-                PulseLowCount = currRiseCount - currFallCount;
-                break;
-              }
-
-            }
-            break;
-          } // end if currFallCount != prevFallCount)
-        } // end while true
-      }  // end  if ((RiseCount != 0) && (FallCount != 0))
-    } //end while ((PulseHighCount == 0) && (PulseLowCount == 0))
-    PulseHighSum += PulseHighCount;
-    PulseLowSum += PulseLowCount;
+      f_total_measured = 2000000.0/((sumhigh/counthigh) + (sumlow/countlow));
+      f_err_calc = f_global*1.55005013e-03 -1.45261187e-01;
+      f_total_measured_compensated = f_total_measured + f_err_calc;
+      f_global_err = f_total_measured_compensated - f_global;
+    } // end if ((countlow >0) && (counthigh>0))
+    else
+    {
+      f_global_err = 0.0;
+      f_component_err = 0.0;
+    }
     
-    Serial.print("<SAMPLE>");
-    Serial.print("<pulsehighcount=");
-    Serial.print(PulseHighCount);
-    Serial.print(">");
-    Serial.print("<Pulselowcount=");
-    Serial.print(PulseLowCount);
-    Serial.print(">");
-        
-    PulseHighCount = 0;
-    PulseLowCount = 0;
-    prevRiseCount = 0;
-    prevFallCount = 0;
-    count++;    
- 
-  } // end while (count < samplesnumber)
-  detachInterrupt(interruptPinRise);
-  detachInterrupt(interruptPinFall);
-  timer2.unsetup();
-  
-  
-  
-  if (count >0) 
+
+  } // end if (globaltune)
+  else
   {
-    f_total_measured = 500000.0/((PulseHighSum + PulseLowSum )/ count);
-    f1_measured = 250000.0/((PulseHighSum)/ count);
-    f2_measured = 250000.0/((PulseLowSum)/ count);
-  }
 
-    Serial.print("<ftm=");
-    Serial.print(String(f_total_measured,5));
-    Serial.print(">");
-    Serial.print("<f1m=");
-    Serial.print(String(f1_measured,5));
-    Serial.print(">");
-    Serial.print("<f2m=");
-    Serial.print(String(f2_measured,5));
-    Serial.print(">");
-    Serial.flush();
-
-  
-
-    //delay(1000);
-  
-  
-  f_err = f_total_measured - tunefrequency;
-  f1_err = f1_measured - f1;
-  f2_err = f2_measured - f2;
-        
-  //FreqCount.end();
-
-  //return integrator;
-}
-
-
-void SingleCountFrequencyDelta(byte samplesnumber,double fcomp, double &fcomp_err, bool low_or_high) {
-
-
-   pinMode(34, INPUT);
-   digitalWrite(34, HIGH);
-  //FreqCount.begin(gatetime);
-
-    double f_measured = 0.0;
-    
-    
-    
-    //float integrator_temp = 0.0;
-    unsigned long sum = 0;   
-     
-    
-
-    byte count = 0;
-    
-    unsigned long pulse = 0;
-    //noInterrupts();
     timer2.setup();
 
-  while (count < samplesnumber)
-  {
-   
-    pulse = pulseInLong2(34,low_or_high,20000);
-    
-    if (pulse != 0)
+    while (count < samplesnumber)
     {
-    // average several reading together
-    sum += pulse;
-    count++;
-    }  
-    /*
-    Serial.print("<pulsehigh=");
-    Serial.print(pulsehigh);
-    Serial.print(">");
-    Serial.print("<pulselow=");
-    Serial.print(pulselow);
-    Serial.print(">");
-    */
-    //count++;
-    //delay(1000);
-    
-  }
-  //interrupts();
-  timer2.unsetup();
-
-  if (count >0) 
-  {
    
-    f_measured = 1000000.0/(sum/count);
-
-    DebugPrint("f_measured",f_measured,2);
-    DebugPrint("f_comp",fcomp,2);
-    /*
-    Serial.print("<f_measured=");
-    Serial.print(String(f_measured,3));
-    Serial.print(">");
-    Serial.print("<fcomp=");
-    Serial.print(String(fcomp,3));
-    Serial.print(">");
-    Serial.flush();
-    */
-  }
-
-    //delay(1000);
-  
- 
+      pulse = pulseInLong2(34,low_or_high,20000);
     
-  fcomp_err = f_measured - fcomp;
+      if (pulse != 0)
+      {
+        // average several reading together
+        sum += pulse;
+        count++;
+      }  
+      /*
+      Serial.print("<pulsehigh=");
+      Serial.print(pulsehigh);
+      Serial.print(">");
+      Serial.print("<pulselow=");
+      Serial.print(pulselow);
+      Serial.print(">");
+      Serial.flush();
+      */
+      //count++;
+      //delay(1000);
+    
+    } // end while (count < samplesnumber)
+    //interrupts();
+    timer2.unsetup();
 
-        
-  //FreqCount.end();
+    if (count >0) 
+    {
+   
+      f_measured = 1000000.0/(sum/count);
+      f_component_err = f_measured - f_component;
+      f_global_err = 0.0;
 
-  //return integrator;
+      DebugPrint("f_measured",f_measured,0);
+      DebugPrint("f_comp",f_component,0);
+      /*
+      Serial.print("<f_measured=");
+      Serial.print(String(f_measured,3));
+      Serial.print(">");
+      Serial.print("<fcomp=");
+      Serial.print(String(fcomp,3));
+      Serial.print(">");
+      Serial.flush();
+      */
+    } // end if (count>0)
+    else
+    {
+      f_component_err = 0.0;
+      f_global_err = 0.0;
+    }
+    
+      //delay(1000);
+    
+  
+      
+  
+  } // end else (!globaltune)
+
 }
 
 
-
+/*
 void AutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool level, int val_vco, bool newmethod) {
 
 
@@ -1185,18 +1190,18 @@ void AutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool level
 
    if (newmethod) 
         {
-          SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+          SingleCountFrequencyDelta(50,freq,dintegrator,level,0); 
           integrator = (float) dintegrator;
           dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
 
           pot_val_change = int(integrator/fabs(integrator));
           DebugPrint("INIT_POT_VAL_CHANGE",double(integrator),2);
-          /*
+          
           Serial.print("<INIT POT VAL CHANGE:");
           Serial.print(pot_val_change);
           Serial.print(">"); 
           Serial.flush();
-          */                   
+                             
         }
 
 while(!tuned) 
@@ -1244,12 +1249,12 @@ while(!tuned)
       {
         DebugPrint("POT_NO_CHANGE",double(m),2);
         //We do nothing
-        /*
+        
         
         Serial.print("<POT NO CHG:m=");
         Serial.print(m);
         Serial.print(">");
-        */
+        
       }
       else
       {
@@ -1263,12 +1268,12 @@ while(!tuned)
             pot_val_temp = ((1/0.28e-6)/(freq*freq*rstep))*integrator;
             //pot_val_temp = ((1/0.28e-6)/(freq*freq*10))*integrator;
             pot_val_change = max(int(pot_val_temp + 0.5),1);
-      /*     
+           
             Serial.print("<VALCALC:");
             Serial.print(String(pot_val_temp,5));
             Serial.print(">");
             Serial.flush();
-      */     
+           
             ptr[m]->increase(pot_val_change);        
             curr_pot_vals[m] = constrain( curr_pot_vals[m] + pot_val_change,0,99);
           }
@@ -1280,14 +1285,14 @@ while(!tuned)
 
           DebugPrint("POT_INC_M",double(m),2);
           DebugPrint("POT_INC_VAL",double(pot_val_change),2);
-        /*
+        
           Serial.print("<POT INC:m=");
           Serial.print(m);
           Serial.print(" VAL=");
           Serial.print(pot_val_change);
           Serial.print(">");
           Serial.flush();
-          */
+          
         }
         else if (((pot_val_change/abs(pot_val_change)) == -1) && (curr_pot_vals[m] > 0)) 
         {
@@ -1299,12 +1304,12 @@ while(!tuned)
             pot_val_temp = ((1/0.28e-6)/(freq*freq*rstep))*integrator;
             //pot_val_temp = ((1/0.28e-6)/(freq*freq*10))*integrator;
             pot_val_change = min(int(pot_val_temp - 0.5),-1);
-    /*        
+            
             Serial.print("<VALCALC:");
             Serial.print(String(pot_val_temp,5));
             Serial.print(">");
             Serial.flush();
-    */        
+            
             ptr[m]->decrease(abs(pot_val_change));
             curr_pot_vals[m] = constrain( curr_pot_vals[m] - abs(pot_val_change),0,99);        
           }
@@ -1317,14 +1322,14 @@ while(!tuned)
           DebugPrint("POT_DEC_M",double(m),2);
           DebugPrint("POT_DEC_VAL",double(pot_val_change),2);
       
-      /*    
+          
           Serial.print("<POT DEC:m=");
           Serial.print(m);
           Serial.print(" VAL=");
           Serial.print(pot_val_change);
           Serial.print(">");
           Serial.flush();
-      */
+      
         }
         else if (((pot_val_change/abs(pot_val_change)) == -1) && (curr_pot_vals[m] == 0)) 
         {
@@ -1332,12 +1337,12 @@ while(!tuned)
           DebugPrint("POT_DEC_M_MINPOS",double(m),2);
           DebugPrint("POT_DEC_VAL",double(pot_val_change),2);
       
-      /*
+      
           Serial.print("<POT DEC but MIN POS:m=");
           Serial.print(m);
           Serial.print(">");
           Serial.flush();
-      */
+      
           if(fabs(integrator_1) > fabs(integrator_2) && (integrator_count > 1))
           //not going in the good direction, bumping
           {
@@ -1346,12 +1351,12 @@ while(!tuned)
             DebugPrint("POT_REV_VAL",double(pot_val_change),2);
       
       
-        /*
+        
             Serial.print("<POT REVERSE AT MIN POS:m=");
             Serial.print(m);
             Serial.print(">");
             Serial.flush();
-        */
+        
           }
           else if (m>val_vco*max_pot)
           {
@@ -1369,12 +1374,12 @@ while(!tuned)
           DebugPrint("POT_INC_MAX_M",double(m),2);
           DebugPrint("POT_INC_VAL",double(pot_val_change),2);
       
-          /*
+          
           Serial.print("<POT INC but MAX POS:m=");
           Serial.print(m);
           Serial.print(">");
           Serial.flush();
-          */
+          
 
           if(fabs(integrator_1) > fabs(integrator_2) && (integrator_count > 1))
           {
@@ -1384,12 +1389,11 @@ while(!tuned)
             DebugPrint("POT_REV_MAX_M",double(m),2);
             DebugPrint("POT_INC_VAL",double(pot_val_change),2);
       
-        /*
             Serial.print("<POT REVERSE AT MAX POS:m=");
             Serial.print(m);
             Serial.print(">");
             Serial.flush();
-        */
+        
           }
           else if (m>val_vco*max_pot)
           {
@@ -1412,34 +1416,26 @@ while(!tuned)
           if (((pot_val_change/abs(pot_val_change)) == 1) && (curr_pot_vals[m+1] < 99)) 
           {
 
-          /* delete that ??
-            if ((curr_pot_vals[m+1] > 1) && (m == 1 + val_vco*max_pot))
-            {
-              Serial.println("<SW-M2-NORM>");
-              ptr[m+1]->increase(pot_val_change);
-              curr_pot_vals[m+1]++;
-              pot_val_change = -1;
-            }
-          */ 
+
             if ((curr_pot_vals[m+1] <= 1) && (m == 1 + val_vco*max_pot))
             {
               // When reaching high frequencies, we increase pot for m==2 only when its value is greater than 1.    
           
               // We are above frequency, we have not increased pot2, so we can only increase pot 1 and pot 0.
-              /*
+              
               Serial.print("<SW-HIGHFREQ>");
               Serial.flush();
-              */
+              
               DebugPrint("SW_HIGHFREQ",double(m),2);
               pot_val_change = 1;
             }
             //else if ((curr_pot_vals[m] > 49) && m==val_vco*max_pot)
             else if ((curr_pot_vals[m] > 49) && m<=(val_vco*max_pot+1))
             {
-              /*
+              
               Serial.print("<SW-M1/2-NORM_FROM_BELOW>");
               Serial.flush();
-              */
+              
               DebugPrint("SW_M1M2_NORM_FROM_BELOW",double(m),2);
               pot_val_change = 1;
               ptr[m+1]->increase(pot_val_change);
@@ -1450,10 +1446,10 @@ while(!tuned)
             //else if ((curr_pot_vals[m] < 49) && m==val_vco*max_pot)
             else if ((curr_pot_vals[m] <= 49) && m<=(val_vco*max_pot +1))
             {
-              /*
+              
               Serial.println("<SW-M1/2-NORM_FROM_ABOVE>");
               Serial.flush();
-              */
+              
               DebugPrint("SW_M1M2_NORM_FROM_ABOVE",double(m),2);
               pot_val_change = -1;
               ptr[m+1]->decrease(abs(pot_val_change));
@@ -1471,12 +1467,12 @@ while(!tuned)
             pot_val_change = 1;
 
             DebugPrint("NEVER_M",double(m),2);
-            /*
+            
             Serial.print("<SW-DEC POT:m=");
             Serial.print(m);
             Serial.print(">");
             Serial.flush();
-            */
+            
             
           }
           else if (((pot_val_change/abs(pot_val_change)) == -1) && (curr_pot_vals[m+1] = 0))
@@ -1501,13 +1497,13 @@ while(!tuned)
           curr_pot_vals[m+1]--;
           DebugPrint("SW_POT_VAL_0_TO_1,DEC_M+1",double(m),2);
           pot_val_change = 1;
-          /*
+          
           Serial.print("<SW-M1/2-NORM_FROM_ABOVE:");
           Serial.print(m);
           Serial.print(">");
           Serial.flush();
          
-          */
+          
 
           
         }
@@ -1520,7 +1516,7 @@ while(!tuned)
 
     if (newmethod) 
     {
-      SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+      SingleCountFrequencyDelta(50,freq,dintegrator,level,0); 
       integrator = (float) dintegrator;
     }
     else 
@@ -1573,18 +1569,7 @@ while(!tuned)
       DebugPrint("SIG_UNCHG",double(m),2);
       switch_pot = false;
       }
-      /*
-    if ( (absintegrator < absintegrator_1) && (absintegrator_1 > absintegrator_2)
-    && ( int(integrator/absintegrator)  == int(integrator_1/absintegrator_1) )  
-    && ( int(integrator_1/absintegrator_1) == int(integrator_2/absintegrator_2) ))
-  
-      {
-      
-      DebugPrint("SIG_CORRECTING",double(m));
-      
-  
-      }
-      */
+
     else if ( int(integrator/absintegrator) != int(integrator_1/absintegrator_1) )
     {
       
@@ -1649,7 +1634,7 @@ while(!tuned)
         // perform a final check.
         if (newmethod) 
         {
-          SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+          SingleCountFrequencyDelta(50,freq,dintegrator,level,0); 
           integrator = (float) dintegrator;
         }
         else
@@ -1747,14 +1732,14 @@ while(!tuned)
           }
             
         }
-        /*
-        checkserial();
-        sprintf (charpotvals, "<%02u,%02u,%02u>",curr_pot_vals[0],curr_pot_vals[1],curr_pot_vals[2]);
-        Serial.print(charpotvals);            
-        */
+        
+        //checkserial();
+        //sprintf (charpotvals, "<%02u,%02u,%02u>",curr_pot_vals[0],curr_pot_vals[1],curr_pot_vals[2]);
+        //Serial.print(charpotvals);            
+        
 if (newmethod)
 {
-  SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+  SingleCountFrequencyDelta(50,freq,dintegrator,level,0); 
   integrator = (float) dintegrator;
   
 }
@@ -1765,13 +1750,14 @@ else
 
 }
 
+*/
 
-void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool level, int val_vco) 
+void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double tunefrequency, double freq, bool level, int val_vco, bool globaltune) 
 {
 
-  static byte max_freq_pot[6] = {99,99,99,99,99,99};
-  static bool max_freq_vco0_set = false;
-  static bool max_freq_vco1_set = false;
+  //static byte max_freq_pot[6] = {99,99,99,99,99,99};
+  //static bool max_freq_vco0_set = false;
+  //static bool max_freq_vco1_set = false;
   int m;
   int max_pot = 3;
   int pot_val_change;
@@ -1784,7 +1770,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
     return;
   }
   
-
+  /*
   if (freq == maxfreq) 
   {
     DebugPrint("MAXFREQ!",double(maxfreq),0);
@@ -1814,12 +1800,11 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       return;
     } // end max_freq_recall
   } // end if max_freq
-  
+  */
   int num_integrations = 0;
   int max_integrations = 90;
   int states[max_integrations][3];
   float states_integrator[max_integrations];
-  int samples_number = 20;
  
   
   
@@ -1840,7 +1825,9 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
 
   bool tuned = false;
   double dintegrator = 0.0;
-  double dintegrator2 = 0.0;
+  double dintegrator_p = 0.0;
+  double dintegrator_p_1 = 0.0;
+  
   
   float integrator = 0.0;
   float integrator_1 = 0.0;
@@ -1852,11 +1839,24 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
   byte curr_pot_val_bck = 0;
 
 
+  if (globaltune)
+  {
+    //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
+    //SingleCountFrequencyDelta(50,freq,dintegrator_p,level);
+    SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,true); 
+    integrator = (float) dintegrator;
+    dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
+  }
+  else
+  {
+    SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,false); 
+    //SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+    integrator = (float) dintegrator_p;
+    dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
 
-  SingleCountFrequencyDelta(50,freq,dintegrator,level); 
-  integrator = (float) dintegrator;
-  dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
-
+  }
+  
+  
   pot_val_change = int(integrator/fabs(integrator));
   DebugPrint("INIT_INTEGRATOR",double(integrator),0);
   PrintDigiPot(curr_pot_vals,val_vco);
@@ -1877,6 +1877,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
     { 
       tuned = true;
       DebugPrint("THRESH_ATT",double(fabs(dev_cents)),0);
+      CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
       
       states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
       states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
@@ -1894,7 +1895,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
         // we can low m in all cases because we are in high pot check.
         integrator_count = 0;
         continue;
-        DebugPrint("BOUND_LIMIT_DEC_M",double(curr_pot_vals[m]),2);
+        DebugPrint("BOUND_LIMIT_DEC_M",double(curr_pot_vals[m]),0);
       
       }
       else if((pot_val_change<0) && (curr_pot_vals[m] == 0))
@@ -1923,14 +1924,33 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
     
       integrator_1 = integrator;
       dev_cents_back = dev_cents; 
-      SingleCountFrequencyDelta(50,freq,dintegrator,level); 
-      integrator = (float) dintegrator;
+  
+      if (globaltune)
+      {
+        dintegrator_p_1 = dintegrator_p;
+        //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
+        //SingleCountFrequencyDelta(50,freq,dintegrator_p,level);
+        SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,true);  
+        integrator = (float) dintegrator;
+        dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
+      }
+      else
+      {
+        //SingleCountFrequencyDelta(50,freq,dintegrator,level);
+        SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,false);  
+        integrator = (float) dintegrator_p;
+        dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
+
+      }
+      //SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+      //integrator = (float) dintegrator;
       pot_val_change = int(integrator/fabs(integrator));
-      dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
+      //dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
       
       DebugPrint("HIGH_POT_IDX",double(m),0); 
       DebugPrint("HIGH_POT_AFTER ",curr_pot_vals[m],0);
       DebugPrint("HIGH_INT_AFTER ",double(integrator),0);
+      DebugPrint("DINTEGRATOR_P", dintegrator_p,0);
       DebugPrint("POT_VAL_AFTER  ",pot_val_change,0);
 
       if (int(integrator/fabs(integrator)) != int(integrator_1/fabs(integrator_1)))
@@ -1942,8 +1962,17 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
         // approx. bias in ohms
         // if bias positive, there is room for going up (decrease freq)
         // if bias negative, there is room for going down (increase freq)
-        pot_val_temp = -d_hertz_to_R(freq,val_vco)*integrator*1000; // * 1000 to convert kOhms in Ohms
-        pot_val_temp2 = -d_hertz_to_R(freq,val_vco)*integrator_1*1000; // * 1000 to convert kOhms in Ohms
+        if (globaltune)
+        {
+          pot_val_temp = -d_hertz_to_R(freq,val_vco)*dintegrator_p*1000; // * 1000 to convert kOhms in Ohms
+          pot_val_temp2 = -d_hertz_to_R(freq,val_vco)*dintegrator_p_1*1000; // * 1000 to convert kOhms in Ohms
+        }
+        else
+        {
+          pot_val_temp = -d_hertz_to_R(freq,val_vco)*integrator*1000; // * 1000 to convert kOhms in Ohms
+          pot_val_temp2 = -d_hertz_to_R(freq,val_vco)*integrator_1*1000; // * 1000 to convert kOhms in Ohms
+        }
+        
 
         DebugPrint("POT_VAL_TEMP", double(pot_val_temp),0);
         DebugPrint("POT_VAL_TEMP2", double(pot_val_temp2),0);
@@ -2127,7 +2156,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       
       else  
       { 
-        DebugPrint("CONTINUE_CHANGE",double(curr_pot_vals[m]),2);
+        DebugPrint("CONTINUE_CHANGE",double(curr_pot_vals[m]),0);
         integrator_count++;
       } 
       
@@ -2142,9 +2171,27 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
     
     else if (m < (max_pot*val_vco +2)) 
     { //start low pot check      
-      SingleCountFrequencyDelta(50,freq,dintegrator,level); 
-      integrator = (float) dintegrator;
-      dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
+      
+      if (globaltune)
+      {
+        //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
+        SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,true); 
+        integrator = (float) dintegrator;
+        dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
+      }
+      else
+      {
+        //SingleCountFrequencyDelta(50,freq,dintegrator,level);
+        SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,false);  
+        integrator = (float) dintegrator_p;
+        dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
+      }
+      
+      
+      
+      //SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+      //integrator = (float) dintegrator;
+      //dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
       rstep = pow(10,m - max_pot*val_vco +1);
       //pot_val_temp = ((1/0.28e-6)/(freq*freq*rstep))*integrator;  
       if (m == max_pot*val_vco)
@@ -2161,8 +2208,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       curr_pot_val_bck = curr_pot_vals[m];
       
       DebugPrint("LOW_POT_IDX_BEFORE",double(m),0);
-      DebugPrint("LOW_POT_BEFORE",curr_pot_vals[m],2);
-      DebugPrint("LOW_INT_BEFORE",double(integrator),2);
+      DebugPrint("LOW_POT_BEFORE",curr_pot_vals[m],0);
+      DebugPrint("LOW_INT_BEFORE",double(integrator),0);
    
       //check bounds
       if((pot_val_temp>0) && (curr_pot_vals[m] == 99))
@@ -2212,15 +2259,33 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       
       integrator_1 = integrator;
       dev_cents = dev_cents_back;  
-      SingleCountFrequencyDelta(50,freq,dintegrator,level); 
-      integrator = (float) dintegrator;
+      
+      if (globaltune)
+      {
+        Serial.print("<GT>");
+        Serial.flush();
+        //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
+        SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,true); 
+        integrator = (float) dintegrator;
+        dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
+      }
+      else
+      {
+        //SingleCountFrequencyDelta(50,freq,dintegrator,level);
+        SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,false);  
+        integrator = (float) dintegrator_p;
+        dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
+      }    
+      
+      //SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+      //integrator = (float) dintegrator;
       
       pot_val_change = int(integrator/fabs(integrator));
-      dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
+      //dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
       
       DebugPrint("LOW_POT_IDX_AFTER",double(m),0);
-      DebugPrint("LOW_POT_AFTER",curr_pot_vals[m],2);
-      DebugPrint("LOW_INT_AFTER",double(integrator),2);
+      DebugPrint("LOW_POT_AFTER",curr_pot_vals[m],0);
+      DebugPrint("LOW_INT_AFTER",double(integrator),0);
       
       if (int(integrator/fabs(integrator)) != int(integrator_1/fabs(integrator_1)))
       {
@@ -2394,6 +2459,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
         
           DebugPrint("LAST_POT_TUNED",double(curr_pot_vals[m]),0);
           tuned = true;
+          //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
           states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
           states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
           states[num_integrations][2] = curr_pot_vals[val_vco*max_pot+2];
@@ -2424,7 +2490,25 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool le
       // check bounds.
     } // end low pot check             
   } // end while tuned
+/*
+Serial.print("<COUNTDELTAGLOBAL>");
 
+for(k = 0;k < 50;k++)
+{
+  CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
+}
+Serial.print("<COUNTDELTA2>");
+for(k = 0;k < 50;k++)
+{
+  double f1;
+  double f2;
+  double f_meas;
+  double f1_meas;
+  double f2_meas;
+  double f_err;
+  CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+}
+*/
 min_integrator = fabs(states_integrator[0]);
         
   for (p=0;p<=num_integrations;p++) 
@@ -2465,7 +2549,6 @@ min_integrator = fabs(states_integrator[0]);
   Serial.print(">");
   Serial.flush();
 
-
   int k = 0;
   for (m=val_vco*max_pot;m<val_vco*max_pot + max_pot;m++) 
   {
@@ -2494,7 +2577,7 @@ min_integrator = fabs(states_integrator[0]);
     }
       
   } // end retune pots to best values
-
+/*
   if (freq == maxfreq)
   {
 
@@ -2521,7 +2604,7 @@ min_integrator = fabs(states_integrator[0]);
       
     }
   }
-
+  */
 } // end NewAutoTune
 
 void writeEEPROMpots (byte noteindex, byte pot2, byte pot1, byte pot0, float deviation, byte vcosel)
@@ -2681,16 +2764,19 @@ void SetNotePots(DigiPot *ptr[6], byte (&pot_vals)[6], bool val_saw, int val_vco
 
 }
 
-float CheckTuning(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, int val_vco) 
+double CheckTuning(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, int val_vco) 
 {
 
-float notefreq;
-float integrator;
+double notefreq;
+double component_freq = notefreq;
+double integrator;
+double component_integrator;
 
 SetNotePots(pots,curr_pot_vals,0,vcosel);
 
-notefreq = pgm_read_float(&(notes_freq[noteindex]));
-integrator = MeasureFrequencyDelta(2,10,notefreq);
+notefreq = double(pgm_read_float(&(notes_freq[noteindex])));
+//integrator = MeasureFrequencyDelta(2,10,notefreq);
+SingleCountFrequencyDelta(50,notefreq,component_freq,integrator,component_integrator,LOW,true);
 
 return integrator;
 
@@ -2805,6 +2891,7 @@ void setup()
   double f_meas;
   double f1_meas;
   double f2_meas;
+  double f_err;
   bool level = true;
   float duty;
   bool arb_vcosel = false;
@@ -2886,7 +2973,7 @@ void setup()
 
     if (!checknotes && !checknotes_formula) 
     {
-      AutoTune(pots,midi_to_pot,notefreq,vcosel,false,false);
+      //AutoTune(pots,midi_to_pot,notefreq,vcosel,false,false);
     }
     else if (checknotes)
     {
@@ -2904,6 +2991,7 @@ void setup()
       f_meas = 0.0;
       f1_meas = 0.0;
       f2_meas = 0.0;
+      f_err = 0.0;
       duty = 0.75;
       MaxVcoPots(pots,midi_to_pot,0);
       MaxVcoPots(pots,midi_to_pot,1);
@@ -2918,28 +3006,63 @@ void setup()
       Serial.flush();
       
       //digitalWrite(vco_pin,0);
-      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas);
+      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       //if (duty > 0.5) { level = !level; arb_vcosel = !arb_vcosel;}
       
       // f1 = high , f2 = low
+      if ((f1 == minfreq) || (f1 == maxfreq))
+      {
+         NewAutoTune(pots,midi_to_pot,notefreq,f1,1,0,0);
+         CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         NewAutoTune(pots,midi_to_pot,notefreq,f2,0,1,1);
+         CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         CountFrequencyDeltaGlobal(50,notefreq,f_err);
+      }
+      else if ((f2 == minfreq) || (f2 == maxfreq))
+      {
+         NewAutoTune(pots,midi_to_pot,notefreq,f2,0,1,0);
+         CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         NewAutoTune(pots,midi_to_pot,notefreq,f1,1,0,1);
+         CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+      }
+      else if (f1 <= f2)
+      {
+         NewAutoTune(pots,midi_to_pot,notefreq,f2,0,1,0);
+         CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         NewAutoTune(pots,midi_to_pot,notefreq,f1,1,0,1);
+         CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+   
+
+      }
+      else if (f1 > f2)
+      {
+         NewAutoTune(pots,midi_to_pot,notefreq,f1,1,0,0);
+         CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         NewAutoTune(pots,midi_to_pot,notefreq,f2,0,1,1);
+         CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         CountFrequencyDeltaGlobal(50,notefreq,f_err);
+      }
+
+      
+     /* 
       NewAutoTune(pots,midi_to_pot,f1,1,0);
       // test delay(100);
-      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas);
+      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       
       NewAutoTune(pots,midi_to_pot,f2,0,1);
       // test delay(100);
-      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas);
-      
+      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+      */
       //integrator = CountFrequencyDelta(6,1000,notefreq);
       
       Serial.print("<fmeas=");
       Serial.print(String(f_meas,3));
       Serial.print(">");
-      Serial.print("<f1=");
-      Serial.print(String(f1,3));
+      Serial.print("<f1_meas=");
+      Serial.print(String(f1_meas,3));
       Serial.print(">");
-      Serial.print("<f2=");
-      Serial.print(String(f2,3));
+      Serial.print("<f2_meas=");
+      Serial.print(String(f2_meas,3));
       Serial.print(">");
       Serial.flush();
       /*
