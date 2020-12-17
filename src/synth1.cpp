@@ -100,7 +100,7 @@ byte n;
 int vcosel;
 char inp;
 bool InTuning = false;
-
+bool midimode = true;
 
 byte midi_to_pot[6];
 int freqrefpin;
@@ -151,26 +151,26 @@ void PrintDigiPot(byte (&curr_pot_vals)[6], byte vcosel)
 {
   if (vcosel == 0)
   {
-    Serial.print("<P0= ");
-    Serial.print(curr_pot_vals[0]);
-    Serial.print(" P1= ");
-    Serial.print(curr_pot_vals[1]);
-    Serial.print(" P2= ");
-    Serial.print(curr_pot_vals[2]);
-    Serial.print(">");
+    Serial1.print("<P0= ");
+    Serial1.print(curr_pot_vals[0]);
+    Serial1.print(" P1= ");
+    Serial1.print(curr_pot_vals[1]);
+    Serial1.print(" P2= ");
+    Serial1.print(curr_pot_vals[2]);
+    Serial1.print(">");
   }
   else if (vcosel == 1)
   {
-    Serial.print("<P3= ");
-    Serial.print(curr_pot_vals[3]);
-    Serial.print(" P4= ");
-    Serial.print(curr_pot_vals[4]);
-    Serial.print(" P5= ");
-    Serial.print(curr_pot_vals[5]);
-    Serial.print(">");
+    Serial1.print("<P3= ");
+    Serial1.print(curr_pot_vals[3]);
+    Serial1.print(" P4= ");
+    Serial1.print(curr_pot_vals[4]);
+    Serial1.print(" P5= ");
+    Serial1.print(curr_pot_vals[5]);
+    Serial1.print(">");
   }
 
-  Serial.flush();
+  Serial1.flush();
 }
 
 void DebugPrint(String token, double value, byte msgdebuglevel)
@@ -178,21 +178,23 @@ void DebugPrint(String token, double value, byte msgdebuglevel)
  /*
  if (msgdebuglevel <= DebugLevel)
   {
-  Serial.print("<");
-  Serial.print(token);
-  Serial.print("=");
-  Serial.print(String(value,5));
-  Serial.print(">");
-  Serial.flush();
+  Serial1.print("<");
+  Serial1.print(token);
+  Serial1.print("=");
+  Serial1.print(String(value,5));
+  Serial1.print(">");
+  Serial1.flush();
   }
 */
 }
 void DebugPrintStr(String token, byte msgdebuglevel)
 {
-  Serial.print("<");
-  Serial.print(token);
-  Serial.print(">");
-  Serial.flush();
+  /*
+  Serial1.print("<");
+  Serial1.print(token);
+  Serial1.print(">");
+  Serial1.flush();
+*/
 }
 
 //Convert frequency to R value using curve fitting
@@ -285,13 +287,13 @@ else if (f2 > maxfreq) {
   f1 = 1.0/(2*(duty*period));
   }
 /*
-Serial.print("<f1,f2,duty,r1,r2:");
-Serial.print(String(f1,3));
-Serial.print(",");
-Serial.print(String(f2,3));
-Serial.print(",");
-Serial.print(String(duty,3));
-Serial.print(",");
+Serial1.print("<f1,f2,duty,r1,r2:");
+Serial1.print(String(f1,3));
+Serial1.print(",");
+Serial1.print(String(f2,3));
+Serial1.print(",");
+Serial1.print(String(duty,3));
+Serial1.print(",");
 */
 
 
@@ -392,31 +394,31 @@ void ChangeNote(byte pot_vals[6], byte (&curr_pot_vals)[6], DigiPot *ptr[6], boo
   for(m = val_vco*max_pot; m < max_pot + val_vco*max_pot; m++) {
 
     /*
-    Serial.print("<pot_val:");
-    Serial.print(pot_vals[m]);
-    Serial.print(">");
+    Serial1.print("<pot_val:");
+    Serial1.print(pot_vals[m]);
+    Serial1.print(">");
     */
     //if (pot_vals[m] < 0) { pot_vals[m] = 0; }
     if (pot_vals[m] > 99) { pot_vals[m] = 99; }
     
     pot_val_change = int(pot_vals[m]) - int(curr_pot_vals[m]);
    /*
-    Serial.print("<m:");
-    Serial.print(m);
-    Serial.print(">");
+    Serial1.print("<m:");
+    Serial1.print(m);
+    Serial1.print(">");
     
-    Serial.print("<pot_val:");
-    Serial.print(pot_vals[m]);
-    Serial.print(">");
+    Serial1.print("<pot_val:");
+    Serial1.print(pot_vals[m]);
+    Serial1.print(">");
    
-    Serial.print("<pot_val_curr:");
-    Serial.print(curr_pot_vals[m]);
-    Serial.print(">");
+    Serial1.print("<pot_val_curr:");
+    Serial1.print(curr_pot_vals[m]);
+    Serial1.print(">");
    
   
-    Serial.print("<pot_val_change:");
-    Serial.print(pot_val_change);
-    Serial.print(">");
+    Serial1.print("<pot_val_change:");
+    Serial1.print(pot_val_change);
+    Serial1.print(">");
     */
    if (pot_val_change > 0) {
       ptr[m]->increase(pot_val_change);
@@ -458,24 +460,24 @@ void GenerateArbitraryFreq(byte (&curr_pot_vals)[6], double freq, double duty, d
   R_to_pot(Rvco2, R100_2, R10_2, R1_2, 1);
 
 /*
-   Serial.print("<");
-   Serial.print(R100_1);
-   Serial.print(",");
+   Serial1.print("<");
+   Serial1.print(R100_1);
+   Serial1.print(",");
 
-   Serial.print(R10_1);
-   Serial.print(",");
+   Serial1.print(R10_1);
+   Serial1.print(",");
 
-   Serial.print(R1_1);
-   Serial.print(",");
+   Serial1.print(R1_1);
+   Serial1.print(",");
 
-   Serial.print(R100_2);
-   Serial.print(",");
+   Serial1.print(R100_2);
+   Serial1.print(",");
 
-   Serial.print(R10_2);
-   Serial.print(",");
+   Serial1.print(R10_2);
+   Serial1.print(",");
 
-   Serial.print(R1_2);
-   Serial.print(">");
+   Serial1.print(R1_2);
+   Serial1.print(">");
 */
 
 
@@ -618,19 +620,19 @@ float MeasureFrequencyDelta(byte totaltime,byte numberofsamples,float tunefreque
     integrator_temp = FreqMeasure.countToFrequency(sum / count);
     integrator = integrator_temp + integrator;
     count2++;
-    Serial.print("<integrator_temp=");
-    Serial.print(String(integrator_temp,3));
-    Serial.print(">");
-    Serial.flush();
+    Serial1.print("<integrator_temp=");
+    Serial1.print(String(integrator_temp,3));
+    Serial1.print(">");
+    Serial1.flush();
 
     }
     //delay(1000);
   }
  
-    Serial.print("<count2=");
-    Serial.print(count2);
-    Serial.print(">");
-    Serial.flush();
+    Serial1.print("<count2=");
+    Serial1.print(count2);
+    Serial1.print(">");
+    Serial1.flush();
    
         if (count2 > 0) {
         integrator = integrator/count2;
@@ -681,10 +683,10 @@ float CountFrequencyDelta(byte totaltime,int gatetime,float tunefrequency) {
   if (count >0) 
   {
     integrator = sum / count;
-    Serial.print("<integrator=");
-    Serial.print(String(integrator,3));
-    Serial.print(">");
-    Serial.flush();
+    Serial1.print("<integrator=");
+    Serial1.print(String(integrator,3));
+    Serial1.print(">");
+    Serial1.flush();
 
   }
 
@@ -791,13 +793,13 @@ void CountFrequencyDeltaGlobal(byte samplesnumber,float tunefrequency, double &f
       countlow++;
     }
     /*
-    Serial.print("<ph=");
-    Serial.print(pulsehigh);
-    Serial.print(">");
-    Serial.print("<pl=");
-    Serial.print(pulselow);
-    Serial.print(">");
-    Serial.flush();
+    Serial1.print("<ph=");
+    Serial1.print(pulsehigh);
+    Serial1.print(">");
+    Serial1.print("<pl=");
+    Serial1.print(pulselow);
+    Serial1.print(">");
+    Serial1.flush();
     */    
     count++;
     //delay(1000);
@@ -819,24 +821,24 @@ void CountFrequencyDeltaGlobal(byte samplesnumber,float tunefrequency, double &f
 
     //delay(1000);
     /*
-    Serial.print("<countlow=");
-    Serial.print(countlow);
-    Serial.print(">");    
-    Serial.print("<counthigh=");
-    Serial.print(counthigh);
-    Serial.print(">");
+    Serial1.print("<countlow=");
+    Serial1.print(countlow);
+    Serial1.print(">");    
+    Serial1.print("<counthigh=");
+    Serial1.print(counthigh);
+    Serial1.print(">");
     */
     DebugPrint("f_total_meas",f_meas,0);
     DebugPrint("f_total_gen",tunefrequency,0);
 
     /*
-    Serial.print("<f1m=");
-    Serial.print(String(f1_measured,5));
-    Serial.print(">");
-    Serial.print("<f2m=");
-    Serial.print(String(f2_measured,5));
-    Serial.print(">");
-    Serial.flush();  
+    Serial1.print("<f1m=");
+    Serial1.print(String(f1_measured,5));
+    Serial1.print(">");
+    Serial1.print("<f2m=");
+    Serial1.print(String(f2_measured,5));
+    Serial1.print(">");
+    Serial1.flush();  
     */
     
     //f_err = f_total_measured - tunefrequency;
@@ -891,13 +893,13 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
     countlow++;
     }
     /*
-    Serial.print("<ph=");
-    Serial.print(pulsehigh);
-    Serial.print(">");
-    Serial.print("<pl=");
-    Serial.print(pulselow);
-    Serial.print(">");
-    Serial.flush();
+    Serial1.print("<ph=");
+    Serial1.print(pulsehigh);
+    Serial1.print(">");
+    Serial1.print("<pl=");
+    Serial1.print(pulselow);
+    Serial1.print(">");
+    Serial1.flush();
     */    
     count++;
     //delay(1000);
@@ -925,26 +927,26 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
 
     //delay(1000);
     /*
-    Serial.print("<countlow=");
-    Serial.print(countlow);
-    Serial.print(">");    
-    Serial.print("<counthigh=");
-    Serial.print(counthigh);
-    Serial.print(">");
+    Serial1.print("<countlow=");
+    Serial1.print(countlow);
+    Serial1.print(">");    
+    Serial1.print("<counthigh=");
+    Serial1.print(counthigh);
+    Serial1.print(">");
     */
+    
+    Serial1.print("<ftm=");
+    Serial1.print(String(f_meas,5));
+    Serial1.print(">");
+    
     /*
-    Serial.print("<ftm=");
-    Serial.print(String(f_meas,5));
-    Serial.print(">");
-    */
-    /*
-    Serial.print("<f1m=");
-    Serial.print(String(f1_measured,5));
-    Serial.print(">");
-    Serial.print("<f2m=");
-    Serial.print(String(f2_measured,5));
-    Serial.print(">");
-    Serial.flush();  
+    Serial1.print("<f1m=");
+    Serial1.print(String(f1_measured,5));
+    Serial1.print(">");
+    Serial1.print("<f2m=");
+    Serial1.print(String(f2_measured,5));
+    Serial1.print(">");
+    Serial1.flush();  
     */
 }
 
@@ -974,12 +976,16 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
   
   ///////
   double f_measured = 0.0;
-    
+   //MIDI.sendNoteOn(80, 127, 1);
+     
 
     
   if (globaltune)
   {
+     //MIDI.sendNoteOn(81, 127, 1);
     timer2.setup();
+    //MIDI.sendNoteOn(82, 127, 1);
+   
     while (count < samplesnumber)
     {
     
@@ -998,13 +1004,13 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
       countlow++;
       }
       /*
-      Serial.print("<ph=");
-      Serial.print(pulsehigh);
-      Serial.print(">");
-      Serial.print("<pl=");
-      Serial.print(pulselow);
-      Serial.print(">");
-      Serial.flush();
+      Serial1.print("<ph=");
+      Serial1.print(pulsehigh);
+      Serial1.print(">");
+      Serial1.print("<pl=");
+      Serial1.print(pulselow);
+      Serial1.print(">");
+      Serial1.flush();
       */    
       count++;
       //delay(1000);
@@ -1023,14 +1029,16 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
         f_measured = 1000000.0/(sumlow/countlow);
       }
       /*
-      Serial.print("<f_measured=");
-      Serial.print(String(f_measured,3));
-      Serial.print(">");
-      Serial.print("<f_component=");
-      Serial.print(String(f_component,3));
-      Serial.print(">");
-      Serial.flush();
+      Serial1.print("<f_glb_cmp_meas=");
+      Serial1.print(String(f_measured,3));
+      Serial1.print(">");
+      
+      Serial1.print("<f_glb_cmp_trg=");
+      Serial1.print(String(f_component,3));
+      Serial1.print(">");
+      Serial1.flush();
       */
+
       f_component_err = f_measured - f_component;
 
       f_total_measured = 2000000.0/((sumhigh/counthigh) + (sumlow/countlow));
@@ -1040,6 +1048,14 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
       f_total_measured_compensated = f_total_measured + f_err_calc;
       f_global_err = f_total_measured_compensated - f_global;
 
+
+      Serial1.print("<f_glb_tot_meas=");
+      Serial1.print(String(f_total_measured_compensated,3));
+      Serial1.print(">");
+
+      Serial1.print("<f_glb_tot_trg=");
+      Serial1.print(String(f_global,3));
+      Serial1.print(">");
 
       DebugPrint("f_total_meas",f_total_measured_compensated,0);
       DebugPrint("f_total_gen",f_global,0);
@@ -1055,13 +1071,14 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
   } // end if (globaltune)
   else
   {
-
+    //MIDI.sendNoteOn(83, 127, 1);
     timer2.setup();
-
+    //MIDI.sendNoteOn(84, 127, 1);
+   
     while (count < samplesnumber)
     {
    
-      pulse = pulseInLong2(34,low_or_high,20000);
+      pulse = pulseInLong2(34,low_or_high,100000);
     
       if (pulse != 0)
       {
@@ -1070,13 +1087,13 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
         count++;
       }  
       /*
-      Serial.print("<pulsehigh=");
-      Serial.print(pulsehigh);
-      Serial.print(">");
-      Serial.print("<pulselow=");
-      Serial.print(pulselow);
-      Serial.print(">");
-      Serial.flush();
+      Serial1.print("<pulsehigh=");
+      Serial1.print(pulsehigh);
+      Serial1.print(">");
+      Serial1.print("<pulselow=");
+      Serial1.print(pulselow);
+      Serial1.print(">");
+      Serial1.flush();
       */
       //count++;
       //delay(1000);
@@ -1094,15 +1111,16 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
 
       DebugPrint("f_comp_meas",f_measured,0);
       DebugPrint("f_comp_gen",f_component,0);
-      /*
-      Serial.print("<f_measured=");
-      Serial.print(String(f_measured,3));
-      Serial.print(">");
-      Serial.print("<fcomp=");
-      Serial.print(String(fcomp,3));
-      Serial.print(">");
-      Serial.flush();
-      */
+      
+      Serial1.print("<f_sng_cmp_meas=");
+      Serial1.print(String(f_measured,3));
+      Serial1.print(">");
+      
+      Serial1.print("<f_sng_cmp_trg=");
+      Serial1.print(String(f_component,3));
+      Serial1.print(">");
+      Serial1.flush();
+      
     } // end if (count>0)
     else
     {
@@ -1124,13 +1142,13 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
 void AutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool level, int val_vco, bool newmethod) {
 
 
-  //Serial.println("AUTO TUNE START");
-  //Serial.println(String(freq));
+  //Serial1.println("AUTO TUNE START");
+  //Serial1.println(String(freq));
   if (freq == minfreq)
   {
     MaxVcoPots(ptr,curr_pot_vals,val_vco);
-    Serial.print("<Autotune_end>");
-    Serial.flush();
+    Serial1.print("<Autotune_end>");
+    Serial1.flush();
     return;
   }
   
@@ -1192,10 +1210,10 @@ void AutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], double freq, bool level
           pot_val_change = int(integrator/fabs(integrator));
           DebugPrint("INIT_POT_VAL_CHANGE",double(integrator),2);
           
-          Serial.print("<INIT POT VAL CHANGE:");
-          Serial.print(pot_val_change);
-          Serial.print(">"); 
-          Serial.flush();
+          Serial1.print("<INIT POT VAL CHANGE:");
+          Serial1.print(pot_val_change);
+          Serial1.print(">"); 
+          Serial1.flush();
                              
         }
 
@@ -1223,8 +1241,8 @@ while(!tuned)
 
     
     sprintf (charnumintegrations, "<NUM_INTEG:%d>", num_integrations);
-    Serial.print(charnumintegrations);
-    Serial.flush();
+    Serial1.print(charnumintegrations);
+    Serial1.flush();
 
     // REMOVE : waiting for integrator to have at least 2 values before changing settings  
     if(integrator_count >= 0) 
@@ -1246,9 +1264,9 @@ while(!tuned)
         //We do nothing
         
         
-        Serial.print("<POT NO CHG:m=");
-        Serial.print(m);
-        Serial.print(">");
+        Serial1.print("<POT NO CHG:m=");
+        Serial1.print(m);
+        Serial1.print(">");
         
       }
       else
@@ -1264,10 +1282,10 @@ while(!tuned)
             //pot_val_temp = ((1/0.28e-6)/(freq*freq*10))*integrator;
             pot_val_change = max(int(pot_val_temp + 0.5),1);
            
-            Serial.print("<VALCALC:");
-            Serial.print(String(pot_val_temp,5));
-            Serial.print(">");
-            Serial.flush();
+            Serial1.print("<VALCALC:");
+            Serial1.print(String(pot_val_temp,5));
+            Serial1.print(">");
+            Serial1.flush();
            
             ptr[m]->increase(pot_val_change);        
             curr_pot_vals[m] = constrain( curr_pot_vals[m] + pot_val_change,0,99);
@@ -1281,12 +1299,12 @@ while(!tuned)
           DebugPrint("POT_INC_M",double(m),2);
           DebugPrint("POT_INC_VAL",double(pot_val_change),2);
         
-          Serial.print("<POT INC:m=");
-          Serial.print(m);
-          Serial.print(" VAL=");
-          Serial.print(pot_val_change);
-          Serial.print(">");
-          Serial.flush();
+          Serial1.print("<POT INC:m=");
+          Serial1.print(m);
+          Serial1.print(" VAL=");
+          Serial1.print(pot_val_change);
+          Serial1.print(">");
+          Serial1.flush();
           
         }
         else if (((pot_val_change/abs(pot_val_change)) == -1) && (curr_pot_vals[m] > 0)) 
@@ -1300,10 +1318,10 @@ while(!tuned)
             //pot_val_temp = ((1/0.28e-6)/(freq*freq*10))*integrator;
             pot_val_change = min(int(pot_val_temp - 0.5),-1);
             
-            Serial.print("<VALCALC:");
-            Serial.print(String(pot_val_temp,5));
-            Serial.print(">");
-            Serial.flush();
+            Serial1.print("<VALCALC:");
+            Serial1.print(String(pot_val_temp,5));
+            Serial1.print(">");
+            Serial1.flush();
             
             ptr[m]->decrease(abs(pot_val_change));
             curr_pot_vals[m] = constrain( curr_pot_vals[m] - abs(pot_val_change),0,99);        
@@ -1318,12 +1336,12 @@ while(!tuned)
           DebugPrint("POT_DEC_VAL",double(pot_val_change),2);
       
           
-          Serial.print("<POT DEC:m=");
-          Serial.print(m);
-          Serial.print(" VAL=");
-          Serial.print(pot_val_change);
-          Serial.print(">");
-          Serial.flush();
+          Serial1.print("<POT DEC:m=");
+          Serial1.print(m);
+          Serial1.print(" VAL=");
+          Serial1.print(pot_val_change);
+          Serial1.print(">");
+          Serial1.flush();
       
         }
         else if (((pot_val_change/abs(pot_val_change)) == -1) && (curr_pot_vals[m] == 0)) 
@@ -1333,10 +1351,10 @@ while(!tuned)
           DebugPrint("POT_DEC_VAL",double(pot_val_change),2);
       
       
-          Serial.print("<POT DEC but MIN POS:m=");
-          Serial.print(m);
-          Serial.print(">");
-          Serial.flush();
+          Serial1.print("<POT DEC but MIN POS:m=");
+          Serial1.print(m);
+          Serial1.print(">");
+          Serial1.flush();
       
           if(fabs(integrator_1) > fabs(integrator_2) && (integrator_count > 1))
           //not going in the good direction, bumping
@@ -1347,10 +1365,10 @@ while(!tuned)
       
       
         
-            Serial.print("<POT REVERSE AT MIN POS:m=");
-            Serial.print(m);
-            Serial.print(">");
-            Serial.flush();
+            Serial1.print("<POT REVERSE AT MIN POS:m=");
+            Serial1.print(m);
+            Serial1.print(">");
+            Serial1.flush();
         
           }
           else if (m>val_vco*max_pot)
@@ -1370,10 +1388,10 @@ while(!tuned)
           DebugPrint("POT_INC_VAL",double(pot_val_change),2);
       
           
-          Serial.print("<POT INC but MAX POS:m=");
-          Serial.print(m);
-          Serial.print(">");
-          Serial.flush();
+          Serial1.print("<POT INC but MAX POS:m=");
+          Serial1.print(m);
+          Serial1.print(">");
+          Serial1.flush();
           
 
           if(fabs(integrator_1) > fabs(integrator_2) && (integrator_count > 1))
@@ -1384,10 +1402,10 @@ while(!tuned)
             DebugPrint("POT_REV_MAX_M",double(m),2);
             DebugPrint("POT_INC_VAL",double(pot_val_change),2);
       
-            Serial.print("<POT REVERSE AT MAX POS:m=");
-            Serial.print(m);
-            Serial.print(">");
-            Serial.flush();
+            Serial1.print("<POT REVERSE AT MAX POS:m=");
+            Serial1.print(m);
+            Serial1.print(">");
+            Serial1.flush();
         
           }
           else if (m>val_vco*max_pot)
@@ -1418,8 +1436,8 @@ while(!tuned)
           
               // We are above frequency, we have not increased pot2, so we can only increase pot 1 and pot 0.
               
-              Serial.print("<SW-HIGHFREQ>");
-              Serial.flush();
+              Serial1.print("<SW-HIGHFREQ>");
+              Serial1.flush();
               
               DebugPrint("SW_HIGHFREQ",double(m),2);
               pot_val_change = 1;
@@ -1428,8 +1446,8 @@ while(!tuned)
             else if ((curr_pot_vals[m] > 49) && m<=(val_vco*max_pot+1))
             {
               
-              Serial.print("<SW-M1/2-NORM_FROM_BELOW>");
-              Serial.flush();
+              Serial1.print("<SW-M1/2-NORM_FROM_BELOW>");
+              Serial1.flush();
               
               DebugPrint("SW_M1M2_NORM_FROM_BELOW",double(m),2);
               pot_val_change = 1;
@@ -1442,8 +1460,8 @@ while(!tuned)
             else if ((curr_pot_vals[m] <= 49) && m<=(val_vco*max_pot +1))
             {
               
-              Serial.println("<SW-M1/2-NORM_FROM_ABOVE>");
-              Serial.flush();
+              Serial1.println("<SW-M1/2-NORM_FROM_ABOVE>");
+              Serial1.flush();
               
               DebugPrint("SW_M1M2_NORM_FROM_ABOVE",double(m),2);
               pot_val_change = -1;
@@ -1463,10 +1481,10 @@ while(!tuned)
 
             DebugPrint("NEVER_M",double(m),2);
             
-            Serial.print("<SW-DEC POT:m=");
-            Serial.print(m);
-            Serial.print(">");
-            Serial.flush();
+            Serial1.print("<SW-DEC POT:m=");
+            Serial1.print(m);
+            Serial1.print(">");
+            Serial1.flush();
             
             
           }
@@ -1493,10 +1511,10 @@ while(!tuned)
           DebugPrint("SW_POT_VAL_0_TO_1,DEC_M+1",double(m),2);
           pot_val_change = 1;
           
-          Serial.print("<SW-M1/2-NORM_FROM_ABOVE:");
-          Serial.print(m);
-          Serial.print(">");
-          Serial.flush();
+          Serial1.print("<SW-M1/2-NORM_FROM_ABOVE:");
+          Serial1.print(m);
+          Serial1.print(">");
+          Serial1.flush();
          
           
 
@@ -1524,7 +1542,7 @@ while(!tuned)
 
     dtostrf(integrator, 10, 3, charintegrator);
     sprintf (charintegratorfmt, "<INTEG:%s>",charintegrator);
-    Serial.print(charintegratorfmt);
+    Serial1.print(charintegratorfmt);
     
 
     DebugPrint("DEV_CENTS",dev_cents,2);
@@ -1640,7 +1658,7 @@ while(!tuned)
            
         DebugPrint("INTEG_FIN_TUNED",double(integrator),2);
         PrintDigiPot(midi_to_pot,val_vco);
-        Serial.flush();
+        Serial1.flush();
         tuned = true;
       }
     }
@@ -1669,18 +1687,18 @@ while(!tuned)
           //DebugPrint("P",double(p));
           //DebugPrint("VAL",double(states_integrator[p]));
           
-          Serial.print("<P=");
-          Serial.print(p);
-          Serial.print(" VAL=");
-          Serial.print(String(states_integrator[p],5));
-          Serial.print(" POT=");
-          Serial.print(states[p][0]);
-          Serial.print(",");
-          Serial.print(states[p][1]);
-          Serial.print(",");       
-          Serial.print(states[p][2]); 
-          Serial.print(">");
-          Serial.flush();
+          Serial1.print("<P=");
+          Serial1.print(p);
+          Serial1.print(" VAL=");
+          Serial1.print(String(states_integrator[p],5));
+          Serial1.print(" POT=");
+          Serial1.print(states[p][0]);
+          Serial1.print(",");
+          Serial1.print(states[p][1]);
+          Serial1.print(",");       
+          Serial1.print(states[p][2]); 
+          Serial1.print(">");
+          Serial1.flush();
 
           if (fabs(states_integrator[p]) < min_integrator) { 
             min_integrator = fabs(states_integrator[p]);
@@ -1688,17 +1706,17 @@ while(!tuned)
           }
         
         }
-        Serial.print("<BEST_POT_VALS:");
-        Serial.print(states[best_index][0]);
-        Serial.print(",");
-        Serial.print(states[best_index][1]);
-        Serial.print(",");       
-        Serial.print(states[best_index][2]);
-        Serial.print(">");
-        Serial.print("<BEST_P:");
-        Serial.print(best_index);
-        Serial.print(">");
-        Serial.flush();
+        Serial1.print("<BEST_POT_VALS:");
+        Serial1.print(states[best_index][0]);
+        Serial1.print(",");
+        Serial1.print(states[best_index][1]);
+        Serial1.print(",");       
+        Serial1.print(states[best_index][2]);
+        Serial1.print(">");
+        Serial1.print("<BEST_P:");
+        Serial1.print(best_index);
+        Serial1.print(">");
+        Serial1.flush();
         
 
         int k = 0;
@@ -1730,7 +1748,7 @@ while(!tuned)
         
         //checkserial();
         //sprintf (charpotvals, "<%02u,%02u,%02u>",curr_pot_vals[0],curr_pot_vals[1],curr_pot_vals[2]);
-        //Serial.print(charpotvals);            
+        //Serial1.print(charpotvals);            
         
 if (newmethod)
 {
@@ -1762,8 +1780,11 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
   {
     MaxVcoPots(ptr,curr_pot_vals,val_vco);
     DebugPrintStr("MINFREQ_SET",2);
-
-    if (globaltune = true) {InTuning = false;}
+    PWM_Note_Settings[noteindex][val_vco*3] = 99;
+    PWM_Note_Settings[noteindex][val_vco*3 +1] = 99;
+    PWM_Note_Settings[noteindex][val_vco*3 +2] = 99;
+     
+    //if (globaltune != true) {InTuning = false;}
     return;
   }
   
@@ -1840,13 +1861,18 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
   {
     //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
     //SingleCountFrequencyDelta(50,freq,dintegrator_p,level);
+    //MIDI.sendNoteOn(70, 127, 1);
     SingleCountFrequencyDelta(10,tunefrequency,freq,dintegrator,dintegrator_p,level,true); 
+    //MIDI.sendNoteOn(71, 127, 1);
+   
     integrator = (float) dintegrator;
     dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
   }
   else
   {
+     //MIDI.sendNoteOn(72, 127, 1);
     SingleCountFrequencyDelta(10,tunefrequency,freq,dintegrator,dintegrator_p,level,false); 
+     //MIDI.sendNoteOn(73, 127, 1);
     //SingleCountFrequencyDelta(50,freq,dintegrator,level); 
     integrator = (float) dintegrator_p;
     dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
@@ -1861,6 +1887,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
 
   while(!tuned) 
   {
+    MIDI.read();
     if (num_integrations == max_integrations) 
     { 
       tuned = true;
@@ -2517,13 +2544,13 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
     } // end low pot check             
   } // end while tuned
 /*
-Serial.print("<COUNTDELTAGLOBAL>");
+Serial1.print("<COUNTDELTAGLOBAL>");
 
 for(k = 0;k < 50;k++)
 {
   CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
 }
-Serial.print("<COUNTDELTA2>");
+Serial1.print("<COUNTDELTA2>");
 for(k = 0;k < 50;k++)
 {
   double f1;
@@ -2543,39 +2570,39 @@ min_integrator = fabs(states_integrator[0]);
 
     //DebugPrint("P",double(p));
     //DebugPrint("VAL",double(states_integrator[p]));
-    /*
-    Serial.print("<P=");
-    Serial.print(p);
-    Serial.print(" VAL=");
-    Serial.print(states_integrator[p]);
-    Serial.print(" POT=");
-    Serial.print(states[p][0]);
-    Serial.print(",");
-    Serial.print(states[p][1]);
-    Serial.print(",");       
-    Serial.print(states[p][2]); 
-    Serial.print(">");
-    Serial.flush();
-    */
+    
+    Serial1.print("<P=");
+    Serial1.print(p);
+    Serial1.print(" VAL=");
+    Serial1.print(states_integrator[p]);
+    Serial1.print(" POT=");
+    Serial1.print(states[p][0]);
+    Serial1.print(",");
+    Serial1.print(states[p][1]);
+    Serial1.print(",");       
+    Serial1.print(states[p][2]); 
+    Serial1.print(">");
+    Serial1.flush();
+    
     if (fabs(states_integrator[p]) < min_integrator) { 
       min_integrator = fabs(states_integrator[p]);
       best_index = p;
     }
 
   }
-  /*
-  Serial.print("<BP_VALS:");
-  Serial.print(states[best_index][0]);
-  Serial.print(",");
-  Serial.print(states[best_index][1]);
-  Serial.print(",");       
-  Serial.print(states[best_index][2]);
-  Serial.print(">");
-  Serial.print("<BP_IDX:");
-  Serial.print(best_index);
-  Serial.print(">");
-  Serial.flush();
-  */
+  
+  Serial1.print("<BP_VALS:");
+  Serial1.print(states[best_index][0]);
+  Serial1.print(",");
+  Serial1.print(states[best_index][1]);
+  Serial1.print(",");       
+  Serial1.print(states[best_index][2]);
+  Serial1.print(">");
+  Serial1.print("<BP_IDX:");
+  Serial1.print(best_index);
+  Serial1.print(">");
+  Serial1.flush();
+  
   int k = 0;
   for (m=val_vco*max_pot;m<val_vco*max_pot + max_pot;m++) 
   {
@@ -2652,22 +2679,31 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   byte noteindex;
   byte midi_to_pot_G[6];
   // restrict OSC to notes of possible frequency range
-  if (pitch < 45) {
+  if (pitch < 48) {
     noteindex = 0;
     }
-  else if (pitch > 95) {
+  else if (pitch > 96) {
     noteindex = 48;
   }
   else {
-    noteindex = pitch - 47;
+    noteindex = pitch - 48;
   }
 
-
-  if (InTuning)  {return;}
+//MIDI.sendNoteOn(41, 127, 1);
+   
+  if (InTuning)  {
+    Serial1.print("<IN_TUNING>");
+   //MIDI.sendNoteOn(42, 127, 1);
+    return;}
   else if (PWM_Note_Settings[noteindex][6] == 0) 
-  {InTuning = true;}
+  { Serial1.print("<NOT_YET_TUNED>");
+    InTuning = true;
+  //MIDI.sendNoteOn(43, 127, 1);
+  }
   else
   {
+    //MIDI.sendNoteOn(44, 127, 1);
+    Serial1.print("<ALREADY_TUNED>");
     midi_to_pot_G[0] = PWM_Note_Settings[noteindex][0];
     midi_to_pot_G[1] = PWM_Note_Settings[noteindex][1];
     midi_to_pot_G[2] = PWM_Note_Settings[noteindex][2];
@@ -2676,62 +2712,92 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     midi_to_pot_G[5] = PWM_Note_Settings[noteindex][5];
     
     ChangeNote(midi_to_pot_G, midi_to_pot, pots, true, 0);
-    pot12.increase(20);
+    pot12.decrease(11);
     return;
   }
+  //MIDI.sendNoteOn(45, 127, 1);
   
-  pot12.increase(20);
+  pot12.decrease(11);
   notefreq = double(pgm_read_float(&(notes_freq[noteindex])));
+  
+  Serial1.print("<NOTEFREQ=");
+  Serial1.print(String(notefreq,3));
+  Serial1.print(">");
 
   MaxVcoPots(pots,midi_to_pot,0);
   MaxVcoPots(pots,midi_to_pot,1);
+  //MIDI.sendNoteOn(46, 127, 1);
   GenerateArbitraryFreq(midi_to_pot,notefreq, duty, f1, f2);
-
+  //MIDI.sendNoteOn(47, 127, 1);
 
   // f1 = high , f2 = low
   if ((f1 == minfreq) || (f1 == maxfreq))
   {
       NewAutoTune(pots,midi_to_pot,noteindex,notefreq,f1,1,0,0);
+      //MIDI.sendNoteOn(48, 127, 1);
+ 
       //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       NewAutoTune(pots,midi_to_pot,noteindex,notefreq,f2,0,1,1);
+      //MIDI.sendNoteOn(49, 127, 1);
+ 
       CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       //CountFrequencyDeltaGlobal(50,notefreq,f_err);
+      //MIDI.sendNoteOn(50, 127, 1);
+ 
   }
   else if ((f2 == minfreq) || (f2 == maxfreq))
   {
       NewAutoTune(pots,midi_to_pot,noteindex,notefreq,f2,0,1,0);
+      //MIDI.sendNoteOn(51, 127, 1);
+ 
       //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       NewAutoTune(pots,midi_to_pot,noteindex,notefreq,f1,1,0,1);
+      //MIDI.sendNoteOn(52, 127, 1);
+ 
       CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+      //MIDI.sendNoteOn(53, 127, 1);
+ 
   }
   else if (f1 <= f2)
   {
       NewAutoTune(pots,midi_to_pot,noteindex,notefreq,f2,0,1,0);
+      //MIDI.sendNoteOn(54, 127, 1);
+ 
       //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       NewAutoTune(pots,midi_to_pot,noteindex,notefreq,f1,1,0,1);
+      //MIDI.sendNoteOn(55, 127, 1);
+ 
       CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-
+      //MIDI.sendNoteOn(56, 127, 1);
+ 
 
   }
   else if (f1 > f2)
   {
       NewAutoTune(pots,midi_to_pot,noteindex,notefreq,f1,1,0,0);
+      //MIDI.sendNoteOn(57, 127, 1);
+ 
       //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       NewAutoTune(pots,midi_to_pot,noteindex,notefreq,f2,0,1,1);
+      //MIDI.sendNoteOn(58, 127, 1);
+ 
       CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+      //MIDI.sendNoteOn(59, 127, 1);
+ 
       //CountFrequencyDeltaGlobal(50,notefreq,f_err);
   }
 
   PWM_Note_Settings[noteindex][6] = 1;
   InTuning = false;
-
+  //MIDI.sendNoteOn(60, 127, 1);
+  
 }
 
 
 void handleNoteOff(byte channel, byte pitch, byte velocity) {
 
   // Disable VCA Gate
-  pot12.decrease(20);
+  pot12.increase(11);
 }
 
 
@@ -2742,9 +2808,9 @@ void writeEEPROMpots (byte noteindex, byte pot2, byte pot1, byte pot0, float dev
 int tuneblock_size = 49*(sizeof(pot2)+sizeof(pot1)+sizeof(pot0)+sizeof(deviation));
 int addr = vcosel*tuneblock_size + noteindex*(sizeof(pot2)+sizeof(pot1)+sizeof(pot0)+sizeof(deviation));
 
-//Serial.print("<addr:");
-//Serial.print(addr);
-//Serial.print(">");
+//Serial1.print("<addr:");
+//Serial1.print(addr);
+//Serial1.print(">");
 
 
 EEPROM.put(addr,pot2);
@@ -2763,9 +2829,9 @@ int tuneblock_size = 49*(sizeof(*pot2)+sizeof(*pot1)+sizeof(*pot0)+sizeof(*devia
 int addr = vcosel*tuneblock_size + noteindex*(sizeof(*pot2)+sizeof(*pot1)+sizeof(*pot0)+sizeof(*deviation));
 
 
-//Serial.print("<addr:");
-//Serial.print(addr);
-//Serial.print(">");
+//Serial1.print("<addr:");
+//Serial1.print(addr);
+//Serial1.print(">");
 
 
 
@@ -2787,9 +2853,9 @@ all_pot_devs++;
 int tuneblock_size = 49*(sizeof(byte)+sizeof(byte)+sizeof(byte)+sizeof(float));
 
 
-//Serial.print("<tuneblock:");
-//Serial.print(tuneblock_size);
-//Serial.print(">");
+//Serial1.print("<tuneblock:");
+//Serial1.print(tuneblock_size);
+//Serial1.print(">");
 
 
 
@@ -2797,9 +2863,9 @@ for (k=1;k<49;k++) {
 
 int addr = tuneblock_size*vcosel + k*(sizeof(byte)+sizeof(byte)+sizeof(byte)+sizeof(float));
 
-//Serial.print("<addr:");
-//Serial.print(addr);
-//Serial.print(">");
+//Serial1.print("<addr:");
+//Serial1.print(addr);
+//Serial1.print(">");
 
 
 EEPROM.get(addr,*all_pot_vals);
@@ -2823,9 +2889,9 @@ void checkserial()
 {
 if (!Serial) {
 delay(10);
-//Serial.begin(9600,SERIAL_8E2);
-Serial.begin(9600);
-//Serial.println("<reset>");  
+//Serial1.begin(9600,SERIAL_8E2);
+Serial1.begin(9600);
+//Serial1.println("<reset>");  
 }
 
 }
@@ -2837,11 +2903,11 @@ void recvWithEndMarker() {
   char rc;
  
 
-  if (Serial.available() > 0) {
-    while (Serial.available() > 0 && newData == false) {
-      rc = Serial.read();
+  if (Serial1.available() > 0) {
+    while (Serial1.available() > 0 && newData == false) {
+      rc = Serial1.read();
       delay(10);
-      //Serial.println(rc);
+      //Serial1.println(rc);
       if (rc != endMarker) {
         receivedChars[ndx] = rc;
         ndx++;
@@ -2850,7 +2916,7 @@ void recvWithEndMarker() {
         }
       }
       else {
-        //Serial.println("endmarker");
+        //Serial1.println("endmarker");
         receivedChars[ndx] = '\0'; // terminate the string
         ndx = 0;
         newData = true;
@@ -2929,28 +2995,27 @@ void setup()
     
   bool dumpeeprom = false;
   bool checknotes = false;
-  bool checknotes_formula = true;
+  bool checknotes_formula = false;
   bool checkpots = false;
   bool generatefreq = false;
   bool donothing = false;
-  bool midimode = true;
   byte vco_pin = 4;
   byte max_pot = 3;
   byte notestart;
   byte noteend;
    
-  //Serial.begin(9600,SERIAL_8E2);
+  //Serial1.begin(9600,SERIAL_8E2);
   if (!midimode)
   {
-    Serial.begin(9600);
-    Serial.print(charspeed);
-    Serial.flush();   
+    Serial1.begin(9600);
+    Serial1.print(charspeed);
+    Serial1.flush();   
     delay(3000);
   }
   StartAllPots(allpots);
-  for (k=0;k<48;k++)
+  for (k=0;k<49;k++)
   {
-    for(n=0;n<6;n++)
+    for(n=0;n<7;n++)
     {
       PWM_Note_Settings[k][n] = 0;
     }    
@@ -2969,24 +3034,9 @@ void setup()
   
   pot12.increase(99);
   
-  pot12.decrease(5);
+  pot12.decrease(11);
   delay(5000);
 
-  if (midimode) 
-  { 
-
-    // Connect the handleNoteOn function to the library,
-    // so it is called upon reception of a NoteOn.
-    MIDI.setHandleNoteOn(handleNoteOn);  // Put only the name of the function
-
-    // Do the same for NoteOffs
-    MIDI.setHandleNoteOff(handleNoteOff);
-    
-    MIDI.begin(MIDI_CHANNEL_OMNI);
-    Serial.begin(115200);
-  
-    return;
-    }
 
   byte pot_vals[49][3];
   float pot_devs[49];
@@ -3002,7 +3052,25 @@ void setup()
   pot_vals[0][1] = 99;
   pot_vals[0][0] = 99;
   pot_devs[0] = 0.0;
+  
+
+  if (midimode) 
+  { 
+
+    // Connect the handleNoteOn function to the library,
+    // so it is called upon reception of a NoteOn.
+    MIDI.setHandleNoteOn(handleNoteOn);  // Put only the name of the function
+
+    // Do the same for NoteOffs
+    MIDI.setHandleNoteOff(handleNoteOff);
     
+    MIDI.begin(MIDI_CHANNEL_OMNI);
+    Serial.begin(9600);
+    Serial1.begin(9600);
+  
+    return;
+  }
+  
 
   if (dumpeeprom) 
   {   
@@ -3015,22 +3083,22 @@ void setup()
       dtostrf(notefreq, 6, 2, charfreq);
 
       sprintf(printcharfreq,"<[%s,", charfreq);
-      Serial.print(printcharfreq);    
-      Serial.print(pot_vals[k][2]);
-      Serial.print(",");
-      Serial.print(pot_vals[k][1]);
-      Serial.print(",");
-      Serial.print(pot_vals[k][0]);
-      Serial.print("]>");
-      Serial.flush();
+      Serial1.print(printcharfreq);    
+      Serial1.print(pot_vals[k][2]);
+      Serial1.print(",");
+      Serial1.print(pot_vals[k][1]);
+      Serial1.print(",");
+      Serial1.print(pot_vals[k][0]);
+      Serial1.print("]>");
+      Serial1.flush();
     
       /*
       // not required for python curve fitting script 
       dtostrf(pot_devs[k], 6, 2, chardev);
       sprintf(chardevfmt,"%s", chardev);
 
-      Serial.print(chardevfmt);
-      Serial.print("]>");
+      Serial1.print(chardevfmt);
+      Serial1.print("]>");
       */
     
       //  delay(100); 
@@ -3055,11 +3123,11 @@ void setup()
 
   if (generatefreq) 
   {
-    Serial.print("<generating freq start>");
+    Serial1.print("<generating freq start>");
     GenerateArbitraryFreq(midi_to_pot,400.0, 0.5, f1, f2);
     delay(120000);
-    Serial.print("<generating freq end>");
-    Serial.flush();
+    Serial1.print("<generating freq end>");
+    Serial1.flush();
     return;
   }
 
@@ -3072,14 +3140,14 @@ void setup()
   midi_to_pot[vcosel*max_pot +2] = pot_vals[notestart - 1][0];
 
 
-  Serial.print("<");
-  Serial.print(midi_to_pot[vcosel*max_pot +2]);
-  Serial.print(",");
-  Serial.print(midi_to_pot[vcosel*max_pot +1]);
-  Serial.print(",");
-  Serial.print(midi_to_pot[vcosel*max_pot]);
-  Serial.print(">");
-  Serial.flush();
+  Serial1.print("<");
+  Serial1.print(midi_to_pot[vcosel*max_pot +2]);
+  Serial1.print(",");
+  Serial1.print(midi_to_pot[vcosel*max_pot +1]);
+  Serial1.print(",");
+  Serial1.print(midi_to_pot[vcosel*max_pot]);
+  Serial1.print(">");
+  Serial1.flush();
 
   float integrator;
   char charintegratorfmt[13];
@@ -3089,12 +3157,12 @@ void setup()
   SetNotePots(pots,midi_to_pot,0,vcosel);
 
 
-  Serial.print("<midi_to_pot:");
-  Serial.print(midi_to_pot[vcosel*max_pot +2]);
-  Serial.print(midi_to_pot[vcosel*max_pot +1]);
-  Serial.print(midi_to_pot[vcosel*max_pot]);
-  Serial.print(">");
-  Serial.flush();
+  Serial1.print("<midi_to_pot:");
+  Serial1.print(midi_to_pot[vcosel*max_pot +2]);
+  Serial1.print(midi_to_pot[vcosel*max_pot +1]);
+  Serial1.print(midi_to_pot[vcosel*max_pot]);
+  Serial1.print(">");
+  Serial1.flush();
 
 
   notefreq = pgm_read_float(&(notes_freq[notestart-1]));
@@ -3104,7 +3172,7 @@ void setup()
 
   dtostrf(integrator, 6, 2, charintegrator);
   sprintf (charintegratorfmt, "<VALUE:%s>",charintegrator);
-  Serial.print(charintegratorfmt);
+  Serial1.print(charintegratorfmt);
   */
 
   //FreqCount.begin(1000);
@@ -3115,15 +3183,15 @@ void setup()
   {
     notefreq = pgm_read_float(&(notes_freq[k]));
     dtostrf(notefreq, 6, 2, charfreq);
-    //Serial.print(charstart);
+    //Serial1.print(charstart);
     
-    //Serial.print(openchar);
-    //Serial.print(charfreq);
-    //Serial.print(closechar);
+    //Serial1.print(openchar);
+    //Serial1.print(charfreq);
+    //Serial1.print(closechar);
     checkserial();
     sprintf(printcharfreq,"<F%s>", charfreq);
-    Serial.print(printcharfreq);
-    Serial.flush();
+    Serial1.print(printcharfreq);
+    Serial1.flush();
 
     if (!checknotes && !checknotes_formula) 
     {
@@ -3151,13 +3219,13 @@ void setup()
       MaxVcoPots(pots,midi_to_pot,1);
       GenerateArbitraryFreq(midi_to_pot,notefreq, 0.75, f1, f2);
       //test delay(2000);
-      Serial.print("<Generated_f1=");
-      Serial.print(String(f1,3));
-      Serial.print(">");
-      Serial.print("<Generated_f2=");
-      Serial.print(String(f2,3));
-      Serial.print(">");
-      Serial.flush();
+      Serial1.print("<Generated_f1=");
+      Serial1.print(String(f1,3));
+      Serial1.print(">");
+      Serial1.print("<Generated_f2=");
+      Serial1.print(String(f2,3));
+      Serial1.print(">");
+      Serial1.flush();
       
 
       //digitalWrite(vco_pin,0);
@@ -3171,10 +3239,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTune(pots,midi_to_pot,notestart,notefreq,f2,0,1,1);
          tuneend = millis() - tunestart;
-         Serial.print("<TUNETIME=");
-         Serial.print(tuneend);
-         Serial.print(">");
-         Serial.flush();
+         Serial1.print("<TUNETIME=");
+         Serial1.print(tuneend);
+         Serial1.print(">");
+         Serial1.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          //CountFrequencyDeltaGlobal(50,notefreq,f_err);
       }
@@ -3184,10 +3252,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTune(pots,midi_to_pot,notestart,notefreq,f1,1,0,1);
          tuneend = millis() - tunestart;
-         Serial.print("<TUNETIME=");
-         Serial.print(tuneend);
-         Serial.print(">");
-         Serial.flush();
+         Serial1.print("<TUNETIME=");
+         Serial1.print(tuneend);
+         Serial1.print(">");
+         Serial1.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       }
       else if (f1 <= f2)
@@ -3196,10 +3264,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTune(pots,midi_to_pot,notestart,notefreq,f1,1,0,1);
          tuneend = millis() - tunestart;
-         Serial.print("<TUNETIME=");
-         Serial.print(tuneend);
-         Serial.print(">");
-         Serial.flush();
+         Serial1.print("<TUNETIME=");
+         Serial1.print(tuneend);
+         Serial1.print(">");
+         Serial1.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
    
 
@@ -3210,10 +3278,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTune(pots,midi_to_pot,notestart,notefreq,f2,0,1,1);
          tuneend = millis() - tunestart;
-         Serial.print("<TUNETIME=");
-         Serial.print(tuneend);
-         Serial.print(">");
-         Serial.flush();
+         Serial1.print("<TUNETIME=");
+         Serial1.print(tuneend);
+         Serial1.print(">");
+         Serial1.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          //CountFrequencyDeltaGlobal(50,notefreq,f_err);
       }
@@ -3230,50 +3298,50 @@ void setup()
       */
       //integrator = CountFrequencyDelta(6,1000,notefreq);
       
-      Serial.print("<fmeas=");
-      Serial.print(String(f_meas,3));
-      Serial.print(">");
+      Serial1.print("<fmeas=");
+      Serial1.print(String(f_meas,3));
+      Serial1.print(">");
       /*
-      Serial.print("<f1_meas=");
-      Serial.print(String(f1_meas,3));
-      Serial.print(">");
-      Serial.print("<f2_meas=");
-      Serial.print(String(f2_meas,3));
-      Serial.print(">");
+      Serial1.print("<f1_meas=");
+      Serial1.print(String(f1_meas,3));
+      Serial1.print(">");
+      Serial1.print("<f2_meas=");
+      Serial1.print(String(f2_meas,3));
+      Serial1.print(">");
       */
-      Serial.flush();
+      Serial1.flush();
       /*
-      Serial.print("<f1err=");
-      Serial.print(String(f1_err,3));
-      Serial.print(">");
-      Serial.print("<f2err=");
-      Serial.print(String(f2_err,3));
-      Serial.print(">");
+      Serial1.print("<f1err=");
+      Serial1.print(String(f1_err,3));
+      Serial1.print(">");
+      Serial1.print("<f2err=");
+      Serial1.print(String(f2_err,3));
+      Serial1.print(">");
       */
       /*
       dtostrf(integrator, 10, 3, charintegrator);
       sprintf (charintegratorfmt, "<INTEG:%s>",charintegrator);
-      Serial.print(charintegratorfmt);
+      Serial1.print(charintegratorfmt);
       */  
 
     } // end check notes formula
     // test 
     checkserial();
     delay(10);
-    Serial.print(charend);
-    Serial.flush();
+    Serial1.print(charend);
+    Serial1.flush();
     delay(10); 
     // test       
     
-    //Serial.print("T,");
-    //Serial.print(String(notefreq));
-    //Serial.print(",");
-    //Serial.print(String(midi_to_pot[0]));
-    //Serial.print(",");
-    //Serial.print(String(midi_to_pot[1]));
-    //Serial.print(",");
-    //Serial.print(String(midi_to_pot[2]));
-    //Serial.println("");
+    //Serial1.print("T,");
+    //Serial1.print(String(notefreq));
+    //Serial1.print(",");
+    //Serial1.print(String(midi_to_pot[0]));
+    //Serial1.print(",");
+    //Serial1.print(String(midi_to_pot[1]));
+    //Serial1.print(",");
+    //Serial1.print(String(midi_to_pot[2]));
+    //Serial1.println("");
     bool getdeviation = false;
     float deviation;
     
@@ -3281,20 +3349,20 @@ void setup()
     while(!getdeviation) 
     {
       recvWithEndMarker();
-      //Serial.println("devloop");
+      //Serial1.println("devloop");
       if (newData == true) 
       {
-        //Serial.println("<yesdata>");
-        //Serial.print("<");
-        //Serial.print(receivedChars);
-        //Serial.println(">");
+        //Serial1.println("<yesdata>");
+        //Serial1.print("<");
+        //Serial1.print(receivedChars);
+        //Serial1.println(">");
         deviation = atof(receivedChars);
         //sscanf( receivedChars, "%f\n", &deviation);
         newData = false;
         getdeviation = true;             
       }
       delay(10);
-      //Serial.println("<nodata>");
+      //Serial1.println("<nodata>");
     }
     delay(1000);
     
@@ -3305,41 +3373,41 @@ void setup()
 
       writeEEPROMpots (k, midi_to_pot[vcosel*max_pot + 2], midi_to_pot[vcosel*max_pot +1], midi_to_pot[vcosel*max_pot], deviation, vcosel);
       //delay(1000);
-      //Serial.print("<new dev better>");
-      //Serial.flush();
+      //Serial1.print("<new dev better>");
+      //Serial1.flush();
     
     }
     else
     { 
-        //Serial.print("<old dev better>"); 
+        //Serial1.print("<old dev better>"); 
     }
 
 
-    Serial.print(charackdev);
-    Serial.flush();
+    Serial1.print(charackdev);
+    Serial1.flush();
     /*
-    Serial.print("<rpot2=");
-    Serial.print(rpot2);
-    Serial.print(">");
+    Serial1.print("<rpot2=");
+    Serial1.print(rpot2);
+    Serial1.print(">");
 
-    Serial.print("<rpot1=");
-    Serial.print(rpot1);
-    Serial.print(">");
+    Serial1.print("<rpot1=");
+    Serial1.print(rpot1);
+    Serial1.print(">");
 
-    Serial.print("<rpot0=");
-    Serial.print(rpot0);
-    Serial.print(">");
+    Serial1.print("<rpot0=");
+    Serial1.print(rpot0);
+    Serial1.print(">");
     */   
     /*
     dtostrf(olddeviation, 6, 2, chardev);
     sprintf(chardevfmt,"<%s>", chardev);
-    Serial.print("<olddev=>");
-    Serial.print(chardevfmt);
+    Serial1.print("<olddev=>");
+    Serial1.print(chardevfmt);
 
     dtostrf(deviation, 6, 2, chardev);
     sprintf(chardevfmt,"<%s>", chardev);
-    Serial.print("<newdev=>");
-    Serial.print(chardevfmt);
+    Serial1.print("<newdev=>");
+    Serial1.print(chardevfmt);
     
     */ 
 
@@ -3357,13 +3425,13 @@ void setup()
       AutoTune(pots,midi_to_pot,notefreq,1);
       
 
-      Serial.println("{");
-      Serial.println(String(midi_to_pot[3]));
-      Serial.println(",");
-      Serial.println(String(midi_to_pot[4]));
-      Serial.println(",");
-      Serial.println(String(midi_to_pot[5]));
-      Serial.println("},\n");
+      Serial1.println("{");
+      Serial1.println(String(midi_to_pot[3]));
+      Serial1.println(",");
+      Serial1.println(String(midi_to_pot[4]));
+      Serial1.println(",");
+      Serial1.println(String(midi_to_pot[5]));
+      Serial1.println("},\n");
     }
     
     */
@@ -3377,22 +3445,25 @@ void setup()
 void loop() {
 
   //delay(10);
-  
-  MIDI.read();
-  
-  if (Serial.available() > 0) {
+  if (midimode)
+  {
+    MIDI.read();
+    return;
+  }
 
-  char inp = Serial.read();
-  //Serial.println(inp);
+  if (Serial1.available() > 0) {
+
+  char inp = Serial1.read();
+  //Serial1.println(inp);
 
     if (inp == '0') {
       vcosel = 0;
-      Serial.println("VCOSEL 0");
+      Serial1.println("VCOSEL 0");
       digitalWrite(4,HIGH);
     }
     else if(inp == '1') {
       vcosel = 1;
-      Serial.println("VCOSEL 1");
+      Serial1.println("VCOSEL 1");
       digitalWrite(4,LOW);
     }
 
