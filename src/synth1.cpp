@@ -17,7 +17,7 @@
 
 MIDI_CREATE_DEFAULT_INSTANCE();
 
-byte DebugLevel = 1;
+byte DebugLevel = 0;
 
 DigiPot pot0(2,3,40);
 DigiPot pot1(2,3,42);
@@ -147,35 +147,39 @@ void MaxVcoPots(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte vcosel) {
     
   }
 
-void PrintDigiPot(byte (&curr_pot_vals)[6], byte vcosel)
+void PrintDigiPot(byte (&curr_pot_vals)[6], byte vcosel, byte msgdebuglevel)
 {
-  if (vcosel == 0)
-  {
-    Serial1.print("<P0= ");
-    Serial1.print(curr_pot_vals[0]);
-    Serial1.print(" P1= ");
-    Serial1.print(curr_pot_vals[1]);
-    Serial1.print(" P2= ");
-    Serial1.print(curr_pot_vals[2]);
-    Serial1.print(">");
-  }
-  else if (vcosel == 1)
-  {
-    Serial1.print("<P3= ");
-    Serial1.print(curr_pot_vals[3]);
-    Serial1.print(" P4= ");
-    Serial1.print(curr_pot_vals[4]);
-    Serial1.print(" P5= ");
-    Serial1.print(curr_pot_vals[5]);
-    Serial1.print(">");
-  }
 
-  Serial1.flush();
+  if (msgdebuglevel <= DebugLevel)
+  {
+    if (vcosel == 0)
+    {
+      Serial1.print("<P0= ");
+      Serial1.print(curr_pot_vals[0]);
+      Serial1.print(" P1= ");
+      Serial1.print(curr_pot_vals[1]);
+      Serial1.print(" P2= ");
+      Serial1.print(curr_pot_vals[2]);
+      Serial1.print(">");
+    }
+    else if (vcosel == 1)
+    {
+      Serial1.print("<P3= ");
+      Serial1.print(curr_pot_vals[3]);
+      Serial1.print(" P4= ");
+      Serial1.print(curr_pot_vals[4]);
+      Serial1.print(" P5= ");
+      Serial1.print(curr_pot_vals[5]);
+      Serial1.print(">");
+    }
+
+    Serial1.flush();
+  }
 }
 
 void DebugPrint(String token, double value, byte msgdebuglevel)
 {
- /*
+ 
  if (msgdebuglevel <= DebugLevel)
   {
   Serial1.print("<");
@@ -185,16 +189,28 @@ void DebugPrint(String token, double value, byte msgdebuglevel)
   Serial1.print(">");
   Serial1.flush();
   }
-*/
+
 }
-void DebugPrintStr(String token, byte msgdebuglevel)
+void DebugPrintToken(String token, byte msgdebuglevel)
 {
-  /*
+
+ if (msgdebuglevel <= DebugLevel)
+  { 
   Serial1.print("<");
   Serial1.print(token);
   Serial1.print(">");
   Serial1.flush();
-*/
+  }
+}
+
+void DebugPrintStr(String token, byte msgdebuglevel)
+{
+  
+  if (msgdebuglevel <= DebugLevel)
+  {
+  Serial1.print(token);
+  Serial1.flush();
+  }
 }
 
 //Convert frequency to R value using curve fitting
@@ -227,9 +243,18 @@ return R;
 double hertz_to_R_v2(double freq, int subvco) {
 
 double R;
-R = 1/(freq*0.44e-6);
+R = 1/(freq*0.066e-6);
 
 return R;
+
+}
+
+double d_hertz_to_R_v2(double freq, int subvco) {
+
+double dR;
+dR = -1/(pow(freq,2)*0.066e-6);
+
+return dR;
 
 }
 
@@ -520,7 +545,7 @@ for(vcosel = 0; vcosel < 2; vcosel++)
     digitalWrite(vco_pin, LOW); 
    }
 
-    DebugPrint("MIN_ALL_POTS_VCO",double(vcosel),2);
+    DebugPrint("MIN_ALL_POTS_VCO",double(vcosel),6);
 
 
       for(m = max_pot*vcosel; m < max_pot + max_pot*vcosel; m++) {
@@ -536,7 +561,7 @@ for(vcosel = 0; vcosel < 2; vcosel++)
       
       }
 
-      DebugPrint("MIN_ALL_POTS_VCO_DONE",double(vcosel),2);
+      DebugPrint("MIN_ALL_POTS_VCO_DONE",double(vcosel),6);
 
       delay(20000);
 
@@ -544,8 +569,8 @@ for(vcosel = 0; vcosel < 2; vcosel++)
       for(m = max_pot*vcosel; m < max_pot + max_pot*vcosel; m++) 
       {
         
-        DebugPrint("MAX_POT_VCO",double(vcosel),2);
-        DebugPrint("MAX_POT_VCO_M",double(m),2);
+        DebugPrint("MAX_POT_VCO",double(vcosel),6);
+        DebugPrint("MAX_POT_VCO_M",double(m),6);
 
 
         for(k=0;k<100;k++)
@@ -557,7 +582,7 @@ for(vcosel = 0; vcosel < 2; vcosel++)
         }
          
         delay(20000);
-        DebugPrint("MAX_ALL_POTS_VCO_DONE",double(vcosel),2);
+        DebugPrint("MAX_ALL_POTS_VCO_DONE",double(vcosel),6);
       
 
         for(k=0;k<100;k++)
@@ -828,8 +853,8 @@ void CountFrequencyDeltaGlobal(byte samplesnumber,float tunefrequency, double &f
     Serial1.print(counthigh);
     Serial1.print(">");
     */
-    DebugPrint("f_total_meas",f_meas,0);
-    DebugPrint("f_total_gen",tunefrequency,0);
+    DebugPrint("f_total_meas",f_meas,4);
+    DebugPrint("f_total_gen",tunefrequency,4);
 
     /*
     Serial1.print("<f1m=");
@@ -935,9 +960,8 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
     Serial1.print(">");
     */
     
-    Serial1.print("<ftm=");
-    Serial1.print(String(f_meas,5));
-    Serial1.print(">");
+    DebugPrint("f_glob_tot_meas",f_meas,5);
+
     
     /*
     Serial1.print("<f1m=");
@@ -1049,16 +1073,8 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
       f_global_err = f_total_measured_compensated - f_global;
 
 
-      Serial1.print("<f_glb_tot_meas=");
-      Serial1.print(String(f_total_measured_compensated,3));
-      Serial1.print(">");
-
-      Serial1.print("<f_glb_tot_trg=");
-      Serial1.print(String(f_global,3));
-      Serial1.print(">");
-
-      DebugPrint("f_total_meas",f_total_measured_compensated,0);
-      DebugPrint("f_total_gen",f_global,0);
+      DebugPrint("f_total_meas",f_total_measured_compensated,4);
+      DebugPrint("f_total_gen",f_global,4);
 
     } // end if ((countlow >0) && (counthigh>0))
     else
@@ -1109,17 +1125,8 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
       f_component_err = f_measured - f_component;
       f_global_err = 0.0;
 
-      DebugPrint("f_comp_meas",f_measured,0);
-      DebugPrint("f_comp_gen",f_component,0);
-      
-      Serial1.print("<f_sng_cmp_meas=");
-      Serial1.print(String(f_measured,3));
-      Serial1.print(">");
-      
-      Serial1.print("<f_sng_cmp_trg=");
-      Serial1.print(String(f_component,3));
-      Serial1.print(">");
-      Serial1.flush();
+      DebugPrint("f_sng_cmp_meas",f_measured,4);
+      DebugPrint("f_sng_cmp_trg",f_component,4);
       
     } // end if (count>0)
     else
@@ -1779,7 +1786,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
   if (freq == minfreq)
   {
     MaxVcoPots(ptr,curr_pot_vals,val_vco);
-    DebugPrintStr("MINFREQ_SET",2);
+    DebugPrintToken("MINFREQ_SET",3);
     PWM_Note_Settings[noteindex][val_vco*3] = 99;
     PWM_Note_Settings[noteindex][val_vco*3 +1] = 99;
     PWM_Note_Settings[noteindex][val_vco*3 +2] = 99;
@@ -1881,8 +1888,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
   
   
   pot_val_change = int(integrator/fabs(integrator));
-  DebugPrint("INIT_DELTA",double(integrator),0);
-  PrintDigiPot(curr_pot_vals,val_vco);
+  DebugPrint("INIT_DELTA",double(integrator),3);
+  PrintDigiPot(curr_pot_vals,val_vco,2);
 
 
   while(!tuned) 
@@ -1900,7 +1907,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
     if (fabs(dev_cents) <= tune_thresh) 
     { 
       tuned = true;
-      DebugPrint("THR_ATT",double(fabs(dev_cents)),0);
+      DebugPrint("THR_ATT",double(fabs(dev_cents)),3);
       CountFrequencyDeltaGlobal(10,tunefrequency,dintegrator);
       
       states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
@@ -1919,7 +1926,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
         // we can low m in all cases because we are in high pot check.
         integrator_count = 0;
         continue;
-        DebugPrint("HP_VAL_OOB",double(curr_pot_vals[m]),0);
+        DebugPrint("HP_VAL_OOB",double(curr_pot_vals[m]),3);
       
       }
       else if((pot_val_change<0) && (curr_pot_vals[m] == 0))
@@ -1928,12 +1935,12 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
         // we can low m in all cases because we are in high pot check.
         integrator_count = 0;
         continue;
-        DebugPrint("HP_VAL_OOB",double(curr_pot_vals[m]),0);
+        DebugPrint("HP_VAL_OOB",double(curr_pot_vals[m]),3);
       }
       
-      DebugPrint("HP_IDX_BEFORE",double(m),0);
-      DebugPrint("HP_VAL_BEFORE",curr_pot_vals[m],0);
-      DebugPrint("HP_DELTA_BEFORE",double(integrator),0);
+      DebugPrint("HP_IDX_BEFORE",double(m),3);
+      DebugPrint("HP_VAL_BEFORE",curr_pot_vals[m],3);
+      DebugPrint("HP_DELTA_BEFORE",double(integrator),3);
       
       curr_pot_vals[m] += pot_val_change;
     
@@ -1971,15 +1978,15 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
       pot_val_change = int(integrator/fabs(integrator));
       //dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
       
-      DebugPrint("HP_IDX_AFTER",double(m),0); 
-      DebugPrint("HP_VAL_AFTER ",curr_pot_vals[m],0);
-      DebugPrint("HP_DELTA_AFTER ",double(integrator),0);
-      DebugPrint("HP_DELTA_COMPONENT_AFTER", dintegrator_p,0);
-      DebugPrint("HP_STEP_AFTER  ",pot_val_change,0);
+      DebugPrint("HP_IDX_AFTER",double(m),3); 
+      DebugPrint("HP_VAL_AFTER ",curr_pot_vals[m],3);
+      DebugPrint("HP_DELTA_AFTER ",double(integrator),3);
+      DebugPrint("HP_DELTA_COMPONENT_AFTER", dintegrator_p,3);
+      DebugPrint("HP_STEP_AFTER  ",pot_val_change,3);
 
       if (int(integrator/fabs(integrator)) != int(integrator_1/fabs(integrator_1)))
       {
-        DebugPrint("HP_ZCROSS_VAL",double(curr_pot_vals[m]),0);
+        DebugPrint("HP_ZCROSS_VAL",double(curr_pot_vals[m]),3);
 
         // zero cross, check for change room in up or down direction for med/low pots.
         bias = 5000 - (100*(curr_pot_vals[m-1]) + curr_pot_vals[m-2]*10);  
@@ -1998,9 +2005,9 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
         }
         
 
-        DebugPrint("HP_STEP_VAL_AFTER", double(pot_val_temp),0);
-        DebugPrint("HP_STEP_VAL_BEFORE", double(pot_val_temp2),0);
-        DebugPrint("HP_BIAS", double(bias),0);
+        DebugPrint("HP_STEP_VAL_AFTER", double(pot_val_temp),4);
+        DebugPrint("HP_STEP_VAL_BEFORE", double(pot_val_temp2),4);
+        DebugPrint("HP_BIAS", double(bias),4);
 
         // check for closest setting in terms of magnitude between two settings
         if(fabs(log(fabs(pot_val_temp/pot_val_temp2))) > 2) // one term is almost 8 times bigger than the other
@@ -2008,13 +2015,13 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
           // take the abs. val smallest one
           if(fabs(pot_val_temp) < fabs(pot_val_temp2))
           {
-                DebugPrint("HP_NOCHNG_MAGN_VAL1", double(pot_val_temp),0);
-                DebugPrint("HP_NOCHNG_MAGN_BIAS1", double(bias),0);
+                DebugPrint("HP_NOCHNG_MAGN_VAL1", double(pot_val_temp),5);
+                DebugPrint("HP_NOCHNG_MAGN_BIAS1", double(bias),5);
           }
           else
           {
-                DebugPrint("HP_REV_MAGN_VAL1", double(pot_val_temp2),0);
-                DebugPrint("HP_REV_MAGN_BIAS1", double(bias),0);
+                DebugPrint("HP_REV_MAGN_VAL1", double(pot_val_temp2),5);
+                DebugPrint("HP_REV_MAGN_BIAS1", double(bias),5);
                 integrator = integrator_1;
                 dev_cents = dev_cents_back;
                 curr_pot_vals[m] += pot_val_change;
@@ -2040,15 +2047,15 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               {
                 // bias is higher than pot_val temp, there is room for change using integrator
                 // change nothing
-                DebugPrint("HP_NOCHNG_VAL1", double(pot_val_temp),0);
-                DebugPrint("HP_NOCHNG_BIAS1", double(bias),0);
+                DebugPrint("HP_NOCHNG_VAL1", double(pot_val_temp),5);
+                DebugPrint("HP_NOCHNG_BIAS1", double(bias),5);
                   
               }
               else if (bias < pot_val_temp) 
               {
 
-                DebugPrint("HP_REV_VAL2", double(pot_val_temp),0);
-                DebugPrint("HP_REV_BIAS2", double(bias),0);
+                DebugPrint("HP_REV_VAL2", double(pot_val_temp),5);
+                DebugPrint("HP_REV_BIAS2", double(bias),5);
                 integrator = integrator_1;
                 dev_cents = dev_cents_back;
                 curr_pot_vals[m] += pot_val_change;
@@ -2067,8 +2074,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               if (bias > pot_val_temp2) // then pot_val_temp2 > 0, because of sign change
               {
 
-                DebugPrint("HP_REV_VAL3", double(pot_val_temp2),0);
-                DebugPrint("HP_REV_BIAS3", double(bias),0);
+                DebugPrint("HP_REV_VAL3", double(pot_val_temp2),5);
+                DebugPrint("HP_REV_BIAS3", double(bias),5);
                 integrator = integrator_1;
                 dev_cents = dev_cents_back;
                 curr_pot_vals[m] += pot_val_change;
@@ -2086,8 +2093,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
                 // bias is lower than pot_val temp, there is no room for change using integrator_1
                 // change nothing
 
-                DebugPrint("HP_NOCHNG_VAL4", double(pot_val_temp2),0);
-                DebugPrint("HP_NOCHNG_BIAS4", double(bias),0);
+                DebugPrint("HP_NOCHNG_VAL4", double(pot_val_temp2),5);
+                DebugPrint("HP_NOCHNG_BIAS4", double(bias),5);
 
               }
             }
@@ -2102,15 +2109,15 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               {
                 // bias is lower than pot_val temp, there is room for change using integrator
                 // change nothing
-                DebugPrint("HP_NOCHNG_VAL5", double(pot_val_temp),0);
-                DebugPrint("HP_NOCHNG_BIAS5", double(bias),0);
+                DebugPrint("HP_NOCHNG_VAL5", double(pot_val_temp),5);
+                DebugPrint("HP_NOCHNG_BIAS5", double(bias),5);
 
               }
               else if (bias > pot_val_temp)
               {
 
-                DebugPrint("HP_REV_VAL6", double(pot_val_temp),0);
-                DebugPrint("HP_REV_BIAS6", double(bias),0);
+                DebugPrint("HP_REV_VAL6", double(pot_val_temp),5);
+                DebugPrint("HP_REV_BIAS6", double(bias),5);
                 dev_cents = dev_cents_back;
                 integrator = integrator_1;
                 curr_pot_vals[m] += pot_val_change;
@@ -2130,8 +2137,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               {
                 // bias is lower than pot_val temp2, there is room for change using integrator_1
                 // revert
-                DebugPrint("HP_REV_VAL7", double(pot_val_temp2),0);
-                DebugPrint("HP_REV_BIAS7", double(bias),0);
+                DebugPrint("HP_REV_VAL7", double(pot_val_temp2),5);
+                DebugPrint("HP_REV_BIAS7", double(bias),5);
 
                 integrator = integrator_1;
                 dev_cents = dev_cents_back;
@@ -2150,8 +2157,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               {
                 // bias is higher thant pot_val_temp2, no room for change using integrator_1, use integrator
                 // change nothing
-                DebugPrint("HP_NOCHNG_VAL8", double(pot_val_temp),0);
-                DebugPrint("HP_NOCHNG_BIAS8", double(bias),0);
+                DebugPrint("HP_NOCHNG_VAL8", double(pot_val_temp),5);
+                DebugPrint("HP_NOCHNG_BIAS8", double(bias),5);
 
               }
             }  
@@ -2209,7 +2216,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
       
       else  
       { 
-        DebugPrint("HP_CONT_CHNG_VAL",double(curr_pot_vals[m]),0);
+        DebugPrint("HP_CONT_CHNG_VAL",double(curr_pot_vals[m]),3);
         integrator_count++;
       } 
       
@@ -2218,7 +2225,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
       states[num_integrations][2] = curr_pot_vals[val_vco*max_pot+2];
       states_integrator[num_integrations] = integrator;  
       num_integrations++; // increment num_integrations high pot
-      DebugPrint("HP_NUM_INTEG_INC",double(num_integrations),0);
+      DebugPrint("HP_NUM_INTEG_INC",double(num_integrations),3);
     
     } // end high pot check.
     
@@ -2262,16 +2269,16 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
       //pot_val_temp = ((1/0.28e-6)/(freq*freq*10))*integrator;
       curr_pot_val_bck = curr_pot_vals[m];
       
-      DebugPrint("LP_IDX_BEFORE",double(m),0);
-      DebugPrint("LP_VAL_BEFORE",curr_pot_vals[m],0);
-      DebugPrint("LP_DELTA_BEFORE",double(integrator),0);
+      DebugPrint("LP_IDX_BEFORE",double(m),3);
+      DebugPrint("LP_VAL_BEFORE",curr_pot_vals[m],3);
+      DebugPrint("LP_DELTA_BEFORE",double(integrator),3);
    
       //check bounds
       if((pot_val_temp>0) && (curr_pot_vals[m] == 99))
       {
         if (m == val_vco*max_pot) 
         { 
-          DebugPrint("LP_VAL_OOB",double(curr_pot_vals[m]),0);
+          DebugPrint("LP_VAL_OOB",double(curr_pot_vals[m]),3);
           tuned = true;
           states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
           states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
@@ -2286,7 +2293,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
       {
         if (m == val_vco*max_pot) 
         { 
-          DebugPrint("LP_VAL_OOB",double(curr_pot_vals[m]),0);
+          DebugPrint("LP_VAL_OOB",double(curr_pot_vals[m]),3);
           tuned = true;
           states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
           states[num_integrations][1] = curr_pot_vals[val_vco*max_pot+1];
@@ -2336,14 +2343,14 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
       pot_val_change = int(integrator/fabs(integrator));
       //dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
       
-      DebugPrint("LP_IDX_AFTER",double(m),0);
-      DebugPrint("LP_VAL_AFTER",curr_pot_vals[m],0);
-      DebugPrint("LP_DELTA_AFTER",double(integrator),0);
+      DebugPrint("LP_IDX_AFTER",double(m),3);
+      DebugPrint("LP_VAL_AFTER",curr_pot_vals[m],3);
+      DebugPrint("LP_DELTA_AFTER",double(integrator),3);
       
       if (int(integrator/fabs(integrator)) != int(integrator_1/fabs(integrator_1)))
       {
         // zero cross, is integrator or integrator_1 closest ?
-        DebugPrint("LP_ZCROSS_VAL",double(curr_pot_vals[m]),0);
+        DebugPrint("LP_ZCROSS_VAL",double(curr_pot_vals[m]),3);
 
         if (m == max_pot*val_vco +1) 
         {
@@ -2351,9 +2358,9 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
           pot_val_temp2 = -(d_hertz_to_R(freq,val_vco)*integrator_1*1000/rstep)/2; // * 1000 to convert kOhms in Ohms
           bias = 500 - (10*(curr_pot_vals[m-1]));
 
-          DebugPrint("LP_STEP_VAL_AFTER", double(pot_val_temp),0);
-          DebugPrint("LP_STEP_VAL_BEFORE", double(pot_val_temp2),0);
-          DebugPrint("LP_BIAS", double(bias),0);
+          DebugPrint("LP_STEP_VAL_AFTER", double(pot_val_temp),4);
+          DebugPrint("LP_STEP_VAL_BEFORE", double(pot_val_temp2),4);
+          DebugPrint("LP_BIAS", double(bias),4);
   
           // pot_val_temp approx change in R (ohms) required.
           if (bias > 0)
@@ -2364,15 +2371,15 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               {
                 // bias is higher than pot_val temp, there is room for change using integrator
                 // change nothing
-                DebugPrint("LP_NOCHNG_VAL1", double(pot_val_temp),0);
-                DebugPrint("LP_NOCHNG_BIAS1", double(bias),0);
+                DebugPrint("LP_NOCHNG_VAL1", double(pot_val_temp),5);
+                DebugPrint("LP_NOCHNG_BIAS1", double(bias),5);
                   
               }
               else if (bias < pot_val_temp) 
               {
 
-                DebugPrint("LP_REV_VAL2", double(pot_val_temp),0);
-                DebugPrint("LP_REV_BIAS2", double(bias),0);
+                DebugPrint("LP_REV_VAL2", double(pot_val_temp),5);
+                DebugPrint("LP_REV_BIAS2", double(bias),5);
                 integrator = integrator_1;
                 dev_cents = dev_cents_back;
                 curr_pot_vals[m] += pot_val_change;
@@ -2391,8 +2398,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               if (bias > pot_val_temp2) // then pot_val_temp2 > 0, because of sign change
               {
 
-                DebugPrint("LP_REV_VAL3", double(pot_val_temp2),0);
-                DebugPrint("LP_REV_BIAS3", double(bias),0);
+                DebugPrint("LP_REV_VAL3", double(pot_val_temp2),5);
+                DebugPrint("LP_REV_BIAS3", double(bias),5);
                 integrator = integrator_1;
                 dev_cents = dev_cents_back;
                 curr_pot_vals[m] += pot_val_change;
@@ -2410,8 +2417,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
                 // bias is lower than pot_val temp, there is no room for change using integrator_1
                 // change nothing
 
-                DebugPrint("LP_NOCHNG_VAL4", double(pot_val_temp2),0);
-                DebugPrint("LP_NOCHNG_BIAS4", double(bias),0);
+                DebugPrint("LP_NOCHNG_VAL4", double(pot_val_temp2),5);
+                DebugPrint("LP_NOCHNG_BIAS4", double(bias),5);
 
               }
             }
@@ -2426,15 +2433,15 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               {
                 // bias is lower than pot_val temp, there is room for change using integrator
                 // change nothing
-                DebugPrint("LP_NOCHNG_VAL5", double(pot_val_temp),0);
-                DebugPrint("LP_NOCHNG_BIAS5", double(bias),0);
+                DebugPrint("LP_NOCHNG_VAL5", double(pot_val_temp),5);
+                DebugPrint("LP_NOCHNG_BIAS5", double(bias),5);
 
               }
               else if (bias > pot_val_temp)
               {
 
-                DebugPrint("LP_REV_VAL6", double(pot_val_temp),0);
-                DebugPrint("LP_REV_BIAS6", double(bias),0);
+                DebugPrint("LP_REV_VAL6", double(pot_val_temp),5);
+                DebugPrint("LP_REV_BIAS6", double(bias),5);
                 integrator = integrator_1;
                 dev_cents = dev_cents_back;
                 curr_pot_vals[m] += pot_val_change;
@@ -2454,8 +2461,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               {
                 // bias is lower than pot_val temp2, there is room for change using integrator_1
                 // revert
-                DebugPrint("LP_REV_VAL7", double(pot_val_temp2),0);
-                DebugPrint("LP_REV_BIAS7", double(bias),0);
+                DebugPrint("LP_REV_VAL7", double(pot_val_temp2),5);
+                DebugPrint("LP_REV_BIAS7", double(bias),5);
 
                 integrator = integrator_1;
                 dev_cents = dev_cents_back;
@@ -2474,8 +2481,8 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               {
                 // bias is higher thant pot_val_temp2, no room for change using integrator_1, use integrator
                 // change nothing
-                DebugPrint("LP_NOCHNG_VAL8", double(pot_val_temp),0);
-                DebugPrint("LP_NOCHNG_BIAS8", double(bias),0);
+                DebugPrint("LP_NOCHNG_VAL8", double(pot_val_temp),5);
+                DebugPrint("LP_NOCHNG_BIAS8", double(bias),5);
 
               }
             }  
@@ -2487,7 +2494,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
           if (fabs(integrator) <= fabs(integrator_1))
           {
             // Change nothing, current value closer.
-            DebugPrint("LASTPOT_NOCHNG_VAL",double(curr_pot_vals[m]),0);
+            DebugPrint("LASTPOT_NOCHNG_VAL",double(curr_pot_vals[m]),3);
 
           }
           else
@@ -2507,10 +2514,10 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
               ptr[m]->decrease(abs(pot_val_change)); 
             }
 
-            DebugPrint("LASTPOT_REV_VAL",double(curr_pot_vals[m]),0);
+            DebugPrint("LASTPOT_REV_VAL",double(curr_pot_vals[m]),3);
           }
         
-          DebugPrint("LASTPOT_TUNED",double(curr_pot_vals[m]),0);
+          DebugPrint("LASTPOT_TUNED",double(curr_pot_vals[m]),3);
           tuned = true;
           //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
           states[num_integrations][0] = curr_pot_vals[val_vco*max_pot];
@@ -2530,7 +2537,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
       } // end zero cross check.
       else 
       { 
-        DebugPrint("LP_CONT_CHNG_VAL",double(curr_pot_vals[m]),0);
+        DebugPrint("LP_CONT_CHNG_VAL",double(curr_pot_vals[m]),3);
         integrator_count++; // zero not crossed, we keep on changing pot for this m
       } // end no zero cross check
       
@@ -2539,7 +2546,7 @@ void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, doub
       states[num_integrations][2] = curr_pot_vals[val_vco*max_pot+2];
       states_integrator[num_integrations] = integrator;
       num_integrations++; //increasing num_integrations low pot
-      DebugPrint("LP_NUM_INTEG_INC",double(num_integrations),0);
+      DebugPrint("LP_NUM_INTEG_INC",double(num_integrations),3);
       // check bounds.
     } // end low pot check             
   } // end while tuned
@@ -2571,37 +2578,38 @@ min_integrator = fabs(states_integrator[0]);
     //DebugPrint("P",double(p));
     //DebugPrint("VAL",double(states_integrator[p]));
     
-    Serial1.print("<P=");
-    Serial1.print(p);
-    Serial1.print(" VAL=");
-    Serial1.print(states_integrator[p]);
-    Serial1.print(" POT=");
-    Serial1.print(states[p][0]);
-    Serial1.print(",");
-    Serial1.print(states[p][1]);
-    Serial1.print(",");       
-    Serial1.print(states[p][2]); 
-    Serial1.print(">");
-    Serial1.flush();
+
+    DebugPrintStr("<P=",2);
+    DebugPrintStr(String(int(p)),2);
+    DebugPrintStr(" VAL=",2);
+    DebugPrintStr(String(int(states_integrator[p])),2);
+    DebugPrintStr(" POT=",2);
+    DebugPrintStr(String(int(states[p][0])),2);
+    DebugPrintStr(",",2);
+    DebugPrintStr(String(int(states[p][1])),2);
+    DebugPrintStr(",",2);
+    DebugPrintStr(String(int(states[p][2])),2);
+    DebugPrintStr(">",2);
     
-    if (fabs(states_integrator[p]) < min_integrator) { 
+    if (fabs(states_integrator[p]) < min_integrator) 
+    { 
       min_integrator = fabs(states_integrator[p]);
       best_index = p;
     }
 
   }
   
-  Serial1.print("<BP_VALS:");
-  Serial1.print(states[best_index][0]);
-  Serial1.print(",");
-  Serial1.print(states[best_index][1]);
-  Serial1.print(",");       
-  Serial1.print(states[best_index][2]);
-  Serial1.print(">");
-  Serial1.print("<BP_IDX:");
-  Serial1.print(best_index);
-  Serial1.print(">");
-  Serial1.flush();
+  DebugPrintStr("<BP_VALS:",2);
+  DebugPrintStr(String(int(states[best_index][0])),2);
+  DebugPrintStr(",",2);
+  DebugPrintStr(String(int(states[best_index][1])),2);
+  DebugPrintStr(",",2);
+  DebugPrintStr(String(int(states[best_index][2])),2);
+  DebugPrintStr(">",2);
+  DebugPrintStr("<BP_IDX:",2);
+  DebugPrintStr(String(int(best_index)),2);
+  DebugPrintStr(">",2);
+ 
   
   int k = 0;
   for (m=val_vco*max_pot;m<val_vco*max_pot + max_pot;m++) 
@@ -2613,8 +2621,8 @@ min_integrator = fabs(states_integrator[0]);
       //for(k=0;k<pot_val_change;k++) 
       //{
         //delay(10);
-      DebugPrint("BP_CHNG_VAL",double(pot_val_change),2);
-      DebugPrint("BP_CHNG_IDX",double(m),2);
+      DebugPrint("BP_CHNG_VAL",double(pot_val_change),5);
+      DebugPrint("BP_CHNG_IDX",double(m),5);
       
       ptr[m]->increase(pot_val_change);
       //}
@@ -2627,8 +2635,8 @@ min_integrator = fabs(states_integrator[0]);
       //{
         //delay(10);
       ptr[m]->decrease(abs(pot_val_change));
-      DebugPrint("BP_CHNG_VAL",double(pot_val_change),2);
-      DebugPrint("BP_CHNG_IDX",double(m),2);
+      DebugPrint("BP_CHNG_VAL",double(pot_val_change),5);
+      DebugPrint("BP_CHNG_IDX",double(m),5);
       //}
                   
     }
@@ -2667,6 +2675,34 @@ min_integrator = fabs(states_integrator[0]);
   */
 } // end NewAutoTune
 
+void ADS()
+{
+  byte r = 1;
+  byte s = 0;
+  while(s<31)
+  {
+    pot12.decrease(r);
+    r = byte(int(r*1.5 +0.5));
+    s += r;
+    delayMicroseconds(10000);
+  }
+
+}
+
+void Release()
+{
+  byte r = 1;
+  byte s = 0;
+  while(s<31)
+  {
+    pot12.increase(r);
+    r = byte(int(r*1.5 +0.5));
+    s += r;
+    delayMicroseconds(10000);
+  }
+}
+
+
 void handleNoteOn(byte channel, byte pitch, byte velocity)
 {
   double f1 = 0.0;
@@ -2692,18 +2728,18 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 //MIDI.sendNoteOn(41, 127, 1);
    
   if (InTuning)  {
-    Serial1.print("<IN_TUNING>");
+    DebugPrintToken("IN_TUNING",1);
    //MIDI.sendNoteOn(42, 127, 1);
     return;}
   else if (PWM_Note_Settings[noteindex][6] == 0) 
-  { Serial1.print("<NOT_YET_TUNED>");
+  { DebugPrintToken("NOT_YET_TUNED",1);
     InTuning = true;
   //MIDI.sendNoteOn(43, 127, 1);
   }
   else
   {
     //MIDI.sendNoteOn(44, 127, 1);
-    Serial1.print("<ALREADY_TUNED>");
+    DebugPrintToken("ALREADY_TUNED",1);
     midi_to_pot_G[0] = PWM_Note_Settings[noteindex][0];
     midi_to_pot_G[1] = PWM_Note_Settings[noteindex][1];
     midi_to_pot_G[2] = PWM_Note_Settings[noteindex][2];
@@ -2712,17 +2748,22 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     midi_to_pot_G[5] = PWM_Note_Settings[noteindex][5];
     
     ChangeNote(midi_to_pot_G, midi_to_pot, pots, true, 0);
-    pot12.decrease(11);
+    ADS();
+    Serial1.print("S");
+    Serial1.print(String(float(noteindex),3));
+    Serial1.print("Z");
+    Serial1.flush();
+    //pot12.decrease(30);
     return;
   }
   //MIDI.sendNoteOn(45, 127, 1);
   
-  pot12.decrease(11);
+  ADS();
+  //pot12.decrease(30);
   notefreq = double(pgm_read_float(&(notes_freq[noteindex])));
   
-  Serial1.print("<NOTEFREQ=");
-  Serial1.print(String(notefreq,3));
-  Serial1.print(">");
+
+  DebugPrint("NOTEFREQ",notefreq,2);
 
   MaxVcoPots(pots,midi_to_pot,0);
   MaxVcoPots(pots,midi_to_pot,1);
@@ -2797,9 +2838,10 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 void handleNoteOff(byte channel, byte pitch, byte velocity) {
 
   // Disable VCA Gate
-  pot12.increase(11);
+  DebugPrintToken("NOTE_OFF",2);
+  Release();
+  //pot12.increase(30);
 }
-
 
 
 void writeEEPROMpots (byte noteindex, byte pot2, byte pot1, byte pot0, float deviation, byte vcosel)
@@ -3034,7 +3076,7 @@ void setup()
   
   pot12.increase(99);
   
-  pot12.decrease(11);
+  //pot12.decrease(3);
   delay(5000);
 
 
@@ -3473,42 +3515,42 @@ void loop() {
     pot0.increase(1);
     (midi_to_pot[0])++;
     //intp0++;
-    PrintDigiPot(midi_to_pot,0); 
+    PrintDigiPot(midi_to_pot,0,2); 
   }
 
     if (inp == 'd') {
     pot1.increase(1);
     (midi_to_pot[1])++;
     //intp1++;
-    PrintDigiPot(midi_to_pot,0);
+    PrintDigiPot(midi_to_pot,0,2);
   }
 
     if (inp == 'f') {
     pot2.increase(1);
     (midi_to_pot[2])++;
     //intp2++;
-    PrintDigiPot(midi_to_pot,0);
+    PrintDigiPot(midi_to_pot,0,2);
   }
 
     if (inp == 'x') {
     pot0.decrease(1);
     (midi_to_pot[0])--;
     //intp0--;
-    PrintDigiPot(midi_to_pot,0);
+    PrintDigiPot(midi_to_pot,0,2);
   }
 
     if (inp == 'c') {
     pot1.decrease(1);
     (midi_to_pot[1])--;
     //intp1--;
-    PrintDigiPot(midi_to_pot,0);
+    PrintDigiPot(midi_to_pot,0,2);
   }
 
     if (inp == 'v') {
     pot2.decrease(1);
     (midi_to_pot[2])--;
     //intp2--;
-    PrintDigiPot(midi_to_pot,0);
+    PrintDigiPot(midi_to_pot,0,2);
   }
 
     }
@@ -3519,42 +3561,42 @@ void loop() {
     pot3.increase(1);
     (midi_to_pot[3])++;
     //intp3++;
-    PrintDigiPot(midi_to_pot,1);
+    PrintDigiPot(midi_to_pot,1,2);
   }
 
     if (inp == 'd') {
     pot4.increase(1);
     (midi_to_pot[4])++;
     //intp4++;
-    PrintDigiPot(midi_to_pot,1);
+    PrintDigiPot(midi_to_pot,1,2);
   }
 
     if (inp == 'f') {
     pot5.increase(1);
     (midi_to_pot[5])++;
     //intp5++;
-    PrintDigiPot(midi_to_pot,1);
+    PrintDigiPot(midi_to_pot,1,2);
   }
 
     if (inp == 'x') {
     pot3.decrease(1);
     (midi_to_pot[3])--;
     //intp3--;
-    PrintDigiPot(midi_to_pot,1); 
+    PrintDigiPot(midi_to_pot,1,2); 
   }
 
     if (inp == 'c') {
     pot4.decrease(1);
     (midi_to_pot[4])--;
     //intp4--;
-    PrintDigiPot(midi_to_pot,1);
+    PrintDigiPot(midi_to_pot,1,2);
   }
 
     if (inp == 'v') {
     pot5.decrease(1);
     (midi_to_pot[5])--;
     //intp5--;
-    PrintDigiPot(midi_to_pot,1); 
+    PrintDigiPot(midi_to_pot,1,2); 
   }
       
     
