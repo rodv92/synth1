@@ -1,6 +1,7 @@
 #include <FreqMeasure.h> 
 #include <DigiPotX9Cxxx.h>
 #include <Wire.h>
+#include <MCP4725.h>
 //#include <MemoryFree.h>
 #include <EEPROM.h>
 #include <Arduino.h>
@@ -14,6 +15,11 @@
 //Adafruit_MCP23017 mcp0;
 //Adafruit_MCP23017 mcp1;
 //Adafruit_MCP23017 mcp2;
+
+
+MCP4725 DAC0(0x62);  // 0x62 or 0x63
+MCP4725 DAC1(0x63);  // 0x62 or 0x63
+
 
 MIDI_CREATE_DEFAULT_INSTANCE();
 
@@ -38,7 +44,7 @@ DigiPot *allpots[7] = { &pot0 , &pot1, &pot2, &pot3, &pot4, &pot5, &pot12};
 
 //volatile unsigned long RiseCount;
 //volatile unsigned long FallCount;
-
+double coarse_freq[2][100];
 
 const double notes_freq[49] PROGMEM = {
 
@@ -278,7 +284,6 @@ return dR;
 }
 
 
-
 // convert saw freq components (subosc1 and 2 of OSC to resistance values of each timer R
 void saw_freq_duty_to_R(double freq, double duty, double &R1 , double &R2, double &f1, double &f2, int vco) {
 
@@ -327,6 +332,42 @@ R2 = hertz_to_R(f2,1);
 
 }
 
+void R_to_pot_DAC(double R, byte &val_pot100K, byte subvco)
+{
+
+
+  double Rtmp;
+  const double R1OOK_total_R_vco0 = 96.77;
+  const double R1OK_total_R_vco0 = 10.08;
+  const double R1K_total_R_vco0 = 1.055;
+  const double trim_pot_R_vco0 = 1.765;
+
+  const double R1OOK_total_R_vco1 = 97.26;
+  const double R1OK_total_R_vco1 = 10.42;
+  const double R1K_total_R_vco1 = 1.033;
+  const double trim_pot_R_vco1 = 1.349;
+
+
+  //const double wiper_R = 0.12;
+  
+
+  if (subvco == 0) {
+
+  // R is in kOhms
+  // we substract wiper resistance and trim pot resistance.
+    Rtmp = R - R1OK_total_R_vco0 - R1K_total_R_vco0 - trim_pot_R_vco0;
+    val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_vco0/99) + 0.5);
+
+  }
+  
+  else if (subvco == 1) 
+  {
+    Rtmp = R - R1OK_total_R_vco0 - R1K_total_R_vco0 - trim_pot_R_vco0;
+    val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_vco1/99) + 0.5);
+  }
+
+
+}
 //Splits R to the settings of the three serial pots (100K, 10K, 1K)
 void R_to_pot(double R, byte &val_pot100K, byte &val_pot10K, byte &val_pot1K, byte subvco) {
 
@@ -454,6 +495,165 @@ void ChangeNote(byte pot_vals[6], byte (&curr_pot_vals)[6], DigiPot *ptr[6], boo
 
     curr_pot_vals[m] = pot_vals[m];
   }
+}
+
+void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty, double &f1, double &f2)
+{
+
+  double Rvco1;
+  double Rvco2;
+
+  double tmp_f1a;
+  double tmp_f2a;
+  double tmp_f1b;
+  double tmp_f2b;
+  
+  
+  byte R100_1;
+  byte R10_1 = 99;
+  byte R1_1 = 99;
+  
+  byte R100_2;
+  byte R10_2 = 99;
+  byte R1_2 = 99;
+  byte idx0;
+  byte idx1;
+ 
+
+  byte midi_to_pot_G[6];
+  // Get Closest Coarse frequency, find k.
+  coarse_freq[0][k];
+  //saw_freq_duty_to_R(freq, duty, Rvco1 , Rvco2, f1, f2 ,0);
+  //f = 1/(R*C) * (1 + (R/53000)*1.5);
+  //f = 1/(R*C) + (1.5/53000)/0.66E-6;
+  //1/RC = f - (1.5/53000)/0.66E-6;
+  //RC = 1/(f - (1.5/53000)/0.66E-6);
+  //R= 1/(f- (1.5/53000)/0.66E-6);
+
+  //Substract R10_1 and R1_1 and R_trim;
+
+
+  DebugPrint("duty",duty,2);
+  DebugPrint("R1",Rvco1,2);
+  DebugPrint("R2",Rvco2,2);
+
+  // estimating coarse pot R
+  R_to_pot_DAC(Rvco1, R100_1, 0);
+  R_to_pot_DAC(Rvco2, R100_2, 1);
+  
+  idx0 = 99 - R100_1;
+  idx1 = 99 - R100_2;
+
+  //coarse_freq table lookup index guess...
+  tmp_f1a = coarse_freq[0][idx0];
+  tmp_f2a = coarse_freq[1][idx1];
+  
+  //try to bracket the frequency between two steps without reading the whole array
+  // sliding window.
+  
+  // frequencies are sorted in increasing order in coarse_freq
+  //VCO 0
+  if (tmp_f1a < f1) 
+  {
+    tmp_f1b = coarse_freq[0][++idx0];
+    while (tmp_f1b < f1)
+    {
+      tmp_f1b = coarse_freq[0][++idx0];
+      tmp_f1a = coarse_freq[0][idx0-1];
+    }
+    if((f1-tmp_f1a) <= (tmp_f1b -f1))
+    {
+      idx0--;
+      // set index to closest frequency
+    }
+  }
+  else // (tmp_f1a > f1)
+  {
+    tmp_f1b = coarse_freq[0][--idx0];
+    while(tmp_f1b > f1)
+    {
+      tmp_f1b = coarse_freq[0][--idx0];
+      tmp_f1a = coarse_freq[0][idx0+1];
+    }
+    if((tmp_f1a-f1) <= (f1-tmp_f1b))
+    {
+      idx0++;
+      // set index to closest frequency
+    }
+  }
+  //VCO 1
+  if (tmp_f2a < f2) 
+  {
+    tmp_f2b = coarse_freq[1][++idx1];
+    
+    while (tmp_f1b < f1)
+    {
+      tmp_f1b = coarse_freq[1][++idx1];
+      tmp_f1a = coarse_freq[1][idx1-1];
+    }
+    if((f1-tmp_f1a) <= (tmp_f1b -f1))
+    {
+      idx1--;
+      // set index to closest frequency
+    }
+  }
+  else // (tmp_f1a > f1)
+  {
+    tmp_f1b = coarse_freq[1][--idx1];
+
+    while(tmp_f1b > f1)
+    {
+      tmp_f1b = coarse_freq[1][--idx1];
+      tmp_f1a = coarse_freq[1][idx1+1];
+    }
+    if((tmp_f1a-f1) <= (f1-tmp_f1b))
+    {
+      idx1++;
+      // set index to closest frequency
+    }
+  }
+  
+// Set the coarse R pot.
+
+/*
+   Serial1.print("<");
+   Serial1.print(R100_1);
+   Serial1.print(",");
+
+   Serial1.print(R10_1);
+   Serial1.print(",");
+
+   Serial1.print(R1_1);
+   Serial1.print(",");
+
+   Serial1.print(R100_2);
+   Serial1.print(",");
+
+   Serial1.print(R10_2);
+   Serial1.print(",");
+
+   Serial1.print(R1_2);
+   Serial1.print(">");
+*/
+
+
+   midi_to_pot_G[0] = R1_1; 
+   midi_to_pot_G[1] = R10_1; 
+   midi_to_pot_G[2] = 99 - idx0; 
+   midi_to_pot_G[3] = R1_2; 
+   midi_to_pot_G[4] = R10_2; 
+   midi_to_pot_G[5] = 99 - idx1; 
+
+  /*
+   for(k=6;k<12;k++){
+   midi_to_pot[k] = 99;
+   }
+  */  
+
+   //Change OSC freq with saw
+   ChangeNote(midi_to_pot_G, curr_pot_vals, pots, true, 0);
+
+
 }
 
 void GenerateArbitraryFreq(byte (&curr_pot_vals)[6], double freq, double duty, double &f1, double &f2)
@@ -772,6 +972,64 @@ unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
       count++;
 	}
 	return (timer2.get_count() - start);
+}
+
+
+void CountFrequency(byte samplesnumber, double &f_meas)
+{
+  pinMode(34, INPUT);
+  //digitalWrite(34, HIGH);
+  //FreqCount.begin(gatetime);
+
+  double f_total_measured = 0.0;
+  double f_err_calc = 0.0;
+  
+  //float integrator_temp = 0.0;
+  unsigned long sumlow = 0;   
+  unsigned long sumhigh = 0;   
+  
+
+  byte counthigh = 0;
+  byte countlow = 0;
+  byte count = 0;
+  
+  unsigned long pulsehigh = 0;
+  unsigned long pulselow = 0;
+
+  timer2.setup();
+  
+  while (count < samplesnumber)
+  {
+   
+    pulsehigh = pulseInLong2(34,HIGH,100000);
+    pulselow = pulseInLong2(34,LOW,100000);
+
+    if (pulsehigh != 0)    
+    {
+      // average several readings together
+      sumhigh += pulsehigh;
+      counthigh++;
+    }  
+    if (pulselow != 0)
+    {
+      sumlow += pulselow;
+      countlow++;
+    }
+    count++;
+  }
+ 
+  timer2.unsetup();
+  
+  if ((countlow >0) && (counthigh>0))
+  {
+    f_total_measured = 2000000.0/((sumhigh/counthigh) + (sumlow/countlow));
+    //f_err_calc = tunefrequency*1.55005013e-03 -1.45261187e-01;
+    f_err_calc = f_total_measured*1.36503806e-03 -7.58951531e-02;
+    f_meas = f_total_measured + f_err_calc;  
+  }
+
+    DebugPrint("f_total_meas",f_meas,4);
+  
 }
 
 void CountFrequencyDeltaGlobal(byte samplesnumber,float tunefrequency, double &f_err) 
@@ -1771,7 +2029,83 @@ else
 }
 
 */
+void NewAutoTuneDAC(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, double tunefrequency, double freq, bool level, int val_vco, bool globaltune) 
+{ 
+  // if minfreq, set it right away
 
+  if (freq == minfreq)
+  {
+    MaxVcoPots(ptr,curr_pot_vals,val_vco);
+    DebugPrintToken("MINFREQ_SET",3);
+    PWM_Note_Settings[noteindex][val_vco*3] = 99;
+    PWM_Note_Settings[noteindex][val_vco*3 +1] = 99;
+    PWM_Note_Settings[noteindex][val_vco*3 +2] = 99;
+     
+    //if (globaltune != true) {InTuning = false;}
+    return;
+  }
+
+  int num_integrations = 0;
+  int max_integrations = 90;
+  int states[max_integrations][3];
+  float states_integrator[max_integrations];
+ 
+  
+  
+  
+  double dev_cents = 0.0;
+  double dev_cents_back = 0.0;
+  const double tune_thresh = 1.0;
+  
+ 
+  int p;
+
+  int bias;
+
+  bool tuned = false;
+  double dintegrator = 0.0;
+  double dintegrator_p = 0.0;
+  double dintegrator_p_1 = 0.0;
+  
+  
+  float integrator = 0.0;
+  float integrator_1 = 0.0;
+  float min_integrator = 0.0;
+
+  int integrator_count = 0;
+
+  int best_index = 0;
+  byte curr_pot_val_bck = 0;
+
+
+
+
+  if (globaltune)
+  {
+    //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
+    //SingleCountFrequencyDelta(50,freq,dintegrator_p,level);
+    //MIDI.sendNoteOn(70, 127, 1);
+    SingleCountFrequencyDelta(10,tunefrequency,freq,dintegrator,dintegrator_p,level,true); 
+    //MIDI.sendNoteOn(71, 127, 1);
+   
+    integrator = (float) dintegrator;
+    dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
+  }
+  else
+  {
+     //MIDI.sendNoteOn(72, 127, 1);
+    SingleCountFrequencyDelta(10,tunefrequency,freq,dintegrator,dintegrator_p,level,false); 
+     //MIDI.sendNoteOn(73, 127, 1);
+    //SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+    integrator = (float) dintegrator_p;
+    dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
+
+  }
+  
+  
+  
+
+}
 
 void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, double tunefrequency, double freq, bool level, int val_vco, bool globaltune) 
 {
@@ -2843,6 +3177,66 @@ void handleNoteOff(byte channel, byte pitch, byte velocity) {
   //pot12.increase(30);
 }
 
+void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte vcosel)
+{
+
+  byte k = 0;
+  byte max_pot = 3;
+  byte m = max_pot*vcosel + 2;
+  double f_meas;
+
+  int prev_data_offset = 686;
+  int tuneblock_size = 100*(sizeof(f_meas));
+  
+  for(k=0;k<100;k++)
+  {
+    ptr[m]->increase(1);
+    delay(5);
+
+  }
+  curr_pot_vals[m] = 99;
+
+  for(k=99;k>=0;k--)
+  {
+
+    DebugPrint("STEP",double(k),0);
+    CountFrequency(50,f_meas);
+    DebugPrint("FREQ",f_meas,0);
+    int addr = prev_data_offset + vcosel*tuneblock_size + (99-k)*(sizeof(f_meas));
+    EEPROM.put(addr,f_meas);
+    //we write frequencies in increasing order
+    delay(1000);
+    DebugPrint("END_STEP",double(k),0);
+    ptr[m]->decrease(1);
+    curr_pot_vals[m]--;
+
+  }
+  
+}
+
+void ReadAllCoarseFrequencies()
+{
+  byte k;
+  byte vco;
+
+  int prev_data_offset = 686;
+  int tuneblock_size = 100*(sizeof(double));
+  int addr;
+  //double *freq;
+  
+  
+  for (vco=0;vco<2;vco++)
+  {
+    for (k=0;k<100;k++) 
+    {
+      addr = prev_data_offset + tuneblock_size*vco + k*(sizeof(double));
+      EEPROM.get(addr,*(*(coarse_freq +vco)+k));
+      // we write frequencies in increasing order
+    }
+
+
+  }
+}
 
 void writeEEPROMpots (byte noteindex, byte pot2, byte pot1, byte pot0, float deviation, byte vcosel)
 {
@@ -3023,6 +3417,12 @@ return integrator;
 void setup() 
 {
 
+   DAC0.begin();
+   DAC1.begin();
+   DAC0.setValue(2047); //half deflection of 4095
+   DAC1.setValue(2047); //half deflection of 4095
+   
+ 
   //char charstart[4] = "<F>";
   char charend[4] = "<E>";
   char charackdev[4] = "<D>";
