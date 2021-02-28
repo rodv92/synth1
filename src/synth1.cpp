@@ -17,9 +17,8 @@
 //Adafruit_MCP23017 mcp2;
 
 
-MCP4725 DAC0(0x62);  // 0x62 or 0x63
-MCP4725 DAC1(0x63);  // 0x62 or 0x63
-
+MCP4725 DAC0(0x60);  
+MCP4725 DAC1(0x61);  
 
 MIDI_CREATE_DEFAULT_INSTANCE();
 
@@ -261,6 +260,34 @@ double dR;
 dR = -1/(pow(freq,2)*0.066e-6);
 
 return dR;
+
+}
+
+double d_freq_to_d_volt(double delta_freq, int subvco) {
+
+double dV;
+dV = - delta_freq * (35000*0.066e-6)/0.32;
+
+return dV;
+
+}
+
+void Adjust_DAC(double delta_V, int subvco) {
+
+  int dac_steps;
+  dac_steps = int(delta_V/(3/4095) + 0.5*(delta_V)/fabs(delta_V));
+  
+  
+  if (subvco == 0) 
+  {
+    DAC0.setValue(2047 + dac_steps);  
+  }
+  else if (subvco == 1)
+  {
+    DAC1.setValue(2047 + dac_steps); 
+  }
+
+   
 
 }
 
@@ -2029,17 +2056,18 @@ else
 }
 
 */
-void NewAutoTuneDAC(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, double tunefrequency, double freq, bool level, int val_vco, bool globaltune) 
+void NewAutoTuneDAC(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, double tunefrequency, double duty ,double freq, bool level, int val_vco, bool globaltune) 
 { 
+  byte max_pot = 3;
   // if minfreq, set it right away
 
   if (freq == minfreq)
   {
     MaxVcoPots(ptr,curr_pot_vals,val_vco);
     DebugPrintToken("MINFREQ_SET",3);
-    PWM_Note_Settings[noteindex][val_vco*3] = 99;
-    PWM_Note_Settings[noteindex][val_vco*3 +1] = 99;
-    PWM_Note_Settings[noteindex][val_vco*3 +2] = 99;
+    PWM_Note_Settings[noteindex][val_vco*max_pot] = 99;
+    PWM_Note_Settings[noteindex][val_vco*max_pot +1] = 99;
+    PWM_Note_Settings[noteindex][val_vco*max_pot +2] = 99;
      
     //if (globaltune != true) {InTuning = false;}
     return;
@@ -2056,6 +2084,7 @@ void NewAutoTuneDAC(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, d
   double dev_cents = 0.0;
   double dev_cents_back = 0.0;
   const double tune_thresh = 1.0;
+  double delta_V = 0.0;
   
  
   int p;
@@ -2077,35 +2106,60 @@ void NewAutoTuneDAC(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, d
   int best_index = 0;
   byte curr_pot_val_bck = 0;
 
-
-
-
-  if (globaltune)
+  min_integrator = fabs(states_integrator[0]);
+        
+  for (p=0;p<=max_integrations;p++) 
   {
-    //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
-    //SingleCountFrequencyDelta(50,freq,dintegrator_p,level);
-    //MIDI.sendNoteOn(70, 127, 1);
-    SingleCountFrequencyDelta(10,tunefrequency,freq,dintegrator,dintegrator_p,level,true); 
-    //MIDI.sendNoteOn(71, 127, 1);
+
+    if (globaltune)
+    {
+      //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
+      //SingleCountFrequencyDelta(50,freq,dintegrator_p,level);
+      //MIDI.sendNoteOn(70, 127, 1);
+      SingleCountFrequencyDelta(10,tunefrequency,freq,dintegrator,dintegrator_p,level,true); 
+      //MIDI.sendNoteOn(71, 127, 1);
+    
+      integrator = (float) dintegrator;
+      dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
+      delta_V = d_freq_to_d_volt(dintegrator_p,val_vco);
+      Adjust_DAC(delta_V,val_vco);
+      //vco formula global tune
+
+    }
+    else
+    {
+      //MIDI.sendNoteOn(72, 127, 1);
+      SingleCountFrequencyDelta(10,tunefrequency,freq,dintegrator,dintegrator_p,level,false); 
+      //MIDI.sendNoteOn(73, 127, 1);
+      //SingleCountFrequencyDelta(50,freq,dintegrator,level); 
+      integrator = (float) dintegrator_p;
+      dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
+      delta_V = d_freq_to_d_volt(integrator,val_vco);
+      Adjust_DAC(delta_V,val_vco);
+      //vco formula single tune
+
+    } // end if globaltune
+
+    if (fabs(dev_cents) <= tune_thresh) 
+    { 
+      tuned = true;
+      DebugPrint("THR_ATT",double(fabs(dev_cents)),3);
    
-    integrator = (float) dintegrator;
-    dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
-  }
-  else
-  {
-     //MIDI.sendNoteOn(72, 127, 1);
-    SingleCountFrequencyDelta(10,tunefrequency,freq,dintegrator,dintegrator_p,level,false); 
-     //MIDI.sendNoteOn(73, 127, 1);
-    //SingleCountFrequencyDelta(50,freq,dintegrator,level); 
-    integrator = (float) dintegrator_p;
-    dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
+      states[p][0] = curr_pot_vals[val_vco*max_pot];
+      states[p][1] = curr_pot_vals[val_vco*max_pot+1];
+      states[p][2] = curr_pot_vals[val_vco*max_pot+2];
+      states_integrator[p] = integrator;
+      break;
+    } //end tune thresh att
 
-  }
-  
-  
-  
+      states[p][0] = curr_pot_vals[val_vco*max_pot];
+      states[p][1] = curr_pot_vals[val_vco*max_pot+1];
+      states[p][2] = curr_pot_vals[val_vco*max_pot+2];
+      states_integrator[p] = integrator;
+        
+  } // end for p < max_integrations
 
-}
+} // end NewAutotuneDAC
 
 void NewAutoTune(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, double tunefrequency, double freq, bool level, int val_vco, bool globaltune) 
 {
@@ -3438,6 +3492,7 @@ void setup()
   bool dumpeeprom = false;
   bool checknotes = false;
   bool checknotes_formula = false;
+  bool checknotes_formula_DAC = false;
   bool checkpots = false;
   bool generatefreq = false;
   bool donothing = false;
@@ -3767,6 +3822,128 @@ void setup()
       */  
 
     } // end check notes formula
+
+
+    else if (checknotes_formula_DAC)
+    {
+
+      f1 = 0.0;
+      f2 = 0.0;
+      f_meas = 0.0;
+      f1_meas = 0.0;
+      f2_meas = 0.0;
+      f_err = 0.0;
+      duty = 0.75;
+      MaxVcoPots(pots,midi_to_pot,0);
+      MaxVcoPots(pots,midi_to_pot,1);
+      GenerateArbitraryFreqDAC(midi_to_pot,notefreq, 0.75, f1, f2);
+      //test delay(2000);
+      Serial1.print("<Generated_f1=");
+      Serial1.print(String(f1,3));
+      Serial1.print(">");
+      Serial1.print("<Generated_f2=");
+      Serial1.print(String(f2,3));
+      Serial1.print(">");
+      Serial1.flush();
+      
+
+      //digitalWrite(vco_pin,0);
+      //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+      //if (duty > 0.5) { level = !level; arb_vcosel = !arb_vcosel;}
+      tunestart = millis();
+      // f1 = high , f2 = low
+      if ((f1 == minfreq) || (f1 == maxfreq))
+      {
+         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,0);
+         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,1);
+         tuneend = millis() - tunestart;
+         Serial1.print("<TUNETIME=");
+         Serial1.print(tuneend);
+         Serial1.print(">");
+         Serial1.flush();
+         CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         //CountFrequencyDeltaGlobal(50,notefreq,f_err);
+      }
+      else if ((f2 == minfreq) || (f2 == maxfreq))
+      {
+         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,0);
+         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,1);
+         tuneend = millis() - tunestart;
+         Serial1.print("<TUNETIME=");
+         Serial1.print(tuneend);
+         Serial1.print(">");
+         Serial1.flush();
+         CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+      }
+      else if (f1 <= f2)
+      {
+         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,0);
+         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,1);
+         tuneend = millis() - tunestart;
+         Serial1.print("<TUNETIME=");
+         Serial1.print(tuneend);
+         Serial1.print(">");
+         Serial1.flush();
+         CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+   
+
+      }
+      else if (f1 > f2)
+      {
+         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,0);
+         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,1);
+         tuneend = millis() - tunestart;
+         Serial1.print("<TUNETIME=");
+         Serial1.print(tuneend);
+         Serial1.print(">");
+         Serial1.flush();
+         CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+         //CountFrequencyDeltaGlobal(50,notefreq,f_err);
+      }
+
+      
+     /* 
+      NewAutoTune(pots,midi_to_pot,f1,1,0);
+      // test delay(100);
+      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+      
+      NewAutoTune(pots,midi_to_pot,f2,0,1);
+      // test delay(100);
+      CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+      */
+      //integrator = CountFrequencyDelta(6,1000,notefreq);
+      
+      Serial1.print("<fmeas=");
+      Serial1.print(String(f_meas,3));
+      Serial1.print(">");
+      /*
+      Serial1.print("<f1_meas=");
+      Serial1.print(String(f1_meas,3));
+      Serial1.print(">");
+      Serial1.print("<f2_meas=");
+      Serial1.print(String(f2_meas,3));
+      Serial1.print(">");
+      */
+      Serial1.flush();
+      /*
+      Serial1.print("<f1err=");
+      Serial1.print(String(f1_err,3));
+      Serial1.print(">");
+      Serial1.print("<f2err=");
+      Serial1.print(String(f2_err,3));
+      Serial1.print(">");
+      */
+      /*
+      dtostrf(integrator, 10, 3, charintegrator);
+      sprintf (charintegratorfmt, "<INTEG:%s>",charintegrator);
+      Serial1.print(charintegratorfmt);
+      */  
+
+    } // end check notes formula DAC
     // test 
     checkserial();
     delay(10);
