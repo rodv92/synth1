@@ -22,7 +22,7 @@ MCP4725 DAC1(0x61);
 
 MIDI_CREATE_DEFAULT_INSTANCE();
 
-byte DebugLevel = 0;
+byte DebugLevel = 2;
 
 DigiPot pot0(2,3,40);
 DigiPot pot1(2,3,42);
@@ -43,7 +43,7 @@ DigiPot *allpots[7] = { &pot0 , &pot1, &pot2, &pot3, &pot4, &pot5, &pot12};
 
 //volatile unsigned long RiseCount;
 //volatile unsigned long FallCount;
-double coarse_freq[2][100];
+double coarse_freq[2][200];
 
 const double notes_freq[49] PROGMEM = {
 
@@ -105,7 +105,7 @@ byte n;
 int vcosel;
 char inp;
 bool InTuning = false;
-bool midimode = true;
+bool midimode;
 
 byte midi_to_pot[6];
 int freqrefpin;
@@ -159,26 +159,26 @@ void PrintDigiPot(byte (&curr_pot_vals)[6], byte vcosel, byte msgdebuglevel)
   {
     if (vcosel == 0)
     {
-      Serial1.print("<P0= ");
-      Serial1.print(curr_pot_vals[0]);
-      Serial1.print(" P1= ");
-      Serial1.print(curr_pot_vals[1]);
-      Serial1.print(" P2= ");
-      Serial1.print(curr_pot_vals[2]);
-      Serial1.print(">");
+      Serial.print("<P0= ");
+      Serial.print(curr_pot_vals[0]);
+      Serial.print(" P1= ");
+      Serial.print(curr_pot_vals[1]);
+      Serial.print(" P2= ");
+      Serial.print(curr_pot_vals[2]);
+      Serial.print(">");
     }
     else if (vcosel == 1)
     {
-      Serial1.print("<P3= ");
-      Serial1.print(curr_pot_vals[3]);
-      Serial1.print(" P4= ");
-      Serial1.print(curr_pot_vals[4]);
-      Serial1.print(" P5= ");
-      Serial1.print(curr_pot_vals[5]);
-      Serial1.print(">");
+      Serial.print("<P3= ");
+      Serial.print(curr_pot_vals[3]);
+      Serial.print(" P4= ");
+      Serial.print(curr_pot_vals[4]);
+      Serial.print(" P5= ");
+      Serial.print(curr_pot_vals[5]);
+      Serial.print(">");
     }
 
-    Serial1.flush();
+    Serial.flush();
   }
 }
 
@@ -187,12 +187,12 @@ void DebugPrint(String token, double value, byte msgdebuglevel)
  
  if (msgdebuglevel <= DebugLevel)
   {
-  Serial1.print("<");
-  Serial1.print(token);
-  Serial1.print("=");
-  Serial1.print(String(value,5));
-  Serial1.print(">");
-  Serial1.flush();
+  Serial.print("<");
+  Serial.print(token);
+  Serial.print("=");
+  Serial.print(String(value,5));
+  Serial.print(">");
+  Serial.flush();
   }
 
 }
@@ -201,10 +201,10 @@ void DebugPrintToken(String token, byte msgdebuglevel)
 
  if (msgdebuglevel <= DebugLevel)
   { 
-  Serial1.print("<");
-  Serial1.print(token);
-  Serial1.print(">");
-  Serial1.flush();
+  Serial.print("<");
+  Serial.print(token);
+  Serial.print(">");
+  Serial.flush();
   }
 }
 
@@ -213,8 +213,8 @@ void DebugPrintStr(String token, byte msgdebuglevel)
   
   if (msgdebuglevel <= DebugLevel)
   {
-  Serial1.print(token);
-  Serial1.flush();
+  Serial.print(token);
+  Serial.flush();
   }
 }
 
@@ -3236,34 +3236,48 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[6], byte (&curr_pot_vals)[
 
   byte k = 0;
   byte max_pot = 3;
-  byte m = max_pot*vcosel + 2;
+  byte m;
+  // max_pot*vcosel + 1;
   double f_meas;
 
-  int prev_data_offset = 686;
-  int tuneblock_size = 100*(sizeof(f_meas));
+  //int prev_data_offset = 686;
+  int prev_data_offset = 0;
   
-  for(k=0;k<100;k++)
+  int tuneblock_size = 200*(sizeof(f_meas));
+  DebugPrint("WRITE COARSE VCO:",double(vcosel),2);
+  
+  for(m=max_pot*vcosel + 1;m<=max_pot*vcosel + 2;m++)
   {
-    ptr[m]->increase(1);
-    delay(5);
+    DebugPrint("RESET POT:",double(m),2);
+    for(k=0;k<100;k++)
+    {
+      ptr[m]->increase(1);
+      delay(5);
 
+    }
+    curr_pot_vals[m] = 99;
   }
-  curr_pot_vals[m] = 99;
+  
 
-  for(k=99;k>=0;k--)
+  for(m=max_pot*vcosel + 1;m<=max_pot*vcosel + 2;m++)
   {
+    DebugPrint("WRITE COARSE POT:",double(m),2);
+  
+    for(k=99;k>=0;k--)
+    {
 
-    DebugPrint("STEP",double(k),0);
-    CountFrequency(50,f_meas);
-    DebugPrint("FREQ",f_meas,0);
-    int addr = prev_data_offset + vcosel*tuneblock_size + (99-k)*(sizeof(f_meas));
-    EEPROM.put(addr,f_meas);
-    //we write frequencies in increasing order
-    delay(1000);
-    DebugPrint("END_STEP",double(k),0);
-    ptr[m]->decrease(1);
-    curr_pot_vals[m]--;
+      DebugPrint("STEP:",double(k),2);
+      CountFrequency(50,f_meas);
+      DebugPrint("FREQ:",f_meas,2);
+      int addr = prev_data_offset + vcosel*tuneblock_size + (99-k)*(sizeof(f_meas));
+      EEPROM.put(addr,f_meas);
+      //we write frequencies in increasing order
+      delay(1000);
+      //DebugPrint("END_STEP",double(k),0);
+      ptr[m]->decrease(1);
+      curr_pot_vals[m]--;
 
+    }
   }
   
 }
@@ -3273,23 +3287,37 @@ void ReadAllCoarseFrequencies()
   byte k;
   byte vco;
 
-  int prev_data_offset = 686;
-  int tuneblock_size = 100*(sizeof(double));
+  //int prev_data_offset = 686;
+  int prev_data_offset = 0;
+  int tuneblock_size = 200*(sizeof(double));
   int addr;
   //double *freq;
   
   
   for (vco=0;vco<2;vco++)
   {
-    for (k=0;k<100;k++) 
+    for (k=0;k<200;k++) 
     {
       addr = prev_data_offset + tuneblock_size*vco + k*(sizeof(double));
       EEPROM.get(addr,*(*(coarse_freq +vco)+k));
-      // we write frequencies in increasing order
+      // we had written frequencies in increasing order
     }
 
 
   }
+  // check that the coarse_freq array is correctly populated
+
+  for (vco=0;vco<2;vco++)
+  {
+    for (k=0;k<200;k++) 
+    {
+      DebugPrint(String(k),coarse_freq[vco][k],2);
+      // we had written frequencies in increasing order
+    }
+
+
+  }
+
 }
 
 void writeEEPROMpots (byte noteindex, byte pot2, byte pot1, byte pot0, float deviation, byte vcosel)
@@ -3393,9 +3421,9 @@ void recvWithEndMarker() {
   char rc;
  
 
-  if (Serial1.available() > 0) {
-    while (Serial1.available() > 0 && newData == false) {
-      rc = Serial1.read();
+  if (Serial.available() > 0) {
+    while (Serial.available() > 0 && newData == false) {
+      rc = Serial.read();
       delay(10);
       //Serial1.println(rc);
       if (rc != endMarker) {
@@ -3495,7 +3523,10 @@ void setup()
   bool checknotes_formula_DAC = false;
   bool checkpots = false;
   bool generatefreq = false;
-  bool donothing = false;
+  bool writecoarsefreqs = false;
+  midimode = false;
+  bool donothing = true;
+
   byte vco_pin = 4;
   byte max_pot = 3;
   byte notestart;
@@ -3528,12 +3559,15 @@ void setup()
 
   MaxVcoPots(pots,midi_to_pot,0);
   MaxVcoPots(pots,midi_to_pot,1);
-  
+  //DACTEST
+  //pot1.decrease(99);
+  //pot4.decrease(99);
+
   pot12.increase(99);
-  
-  //pot12.decrease(3);
   delay(5000);
 
+  pot12.decrease(3);
+  
 
   byte pot_vals[49][3];
   float pot_devs[49];
@@ -3550,6 +3584,12 @@ void setup()
   pot_vals[0][0] = 99;
   pot_devs[0] = 0.0;
   
+  if (donothing) 
+  {
+    Serial.begin(9600);
+    DebugPrintStr("SERIAL 9600",0);
+    return;
+  }
 
   if (midimode) 
   { 
@@ -3568,6 +3608,13 @@ void setup()
     return;
   }
   
+  if (writecoarsefreqs)
+  {
+    WriteEEPROMCoarsePotStepFrequencies(pots,midi_to_pot,0);
+    WriteEEPROMCoarsePotStepFrequencies(pots,midi_to_pot,1);
+    ReadAllCoarseFrequencies();
+    
+  }
 
   if (dumpeeprom) 
   {   
@@ -3580,14 +3627,14 @@ void setup()
       dtostrf(notefreq, 6, 2, charfreq);
 
       sprintf(printcharfreq,"<[%s,", charfreq);
-      Serial1.print(printcharfreq);    
-      Serial1.print(pot_vals[k][2]);
-      Serial1.print(",");
-      Serial1.print(pot_vals[k][1]);
-      Serial1.print(",");
-      Serial1.print(pot_vals[k][0]);
-      Serial1.print("]>");
-      Serial1.flush();
+      Serial.print(printcharfreq);    
+      Serial.print(pot_vals[k][2]);
+      Serial.print(",");
+      Serial.print(pot_vals[k][1]);
+      Serial.print(",");
+      Serial.print(pot_vals[k][0]);
+      Serial.print("]>");
+      Serial.flush();
     
       /*
       // not required for python curve fitting script 
@@ -3620,11 +3667,11 @@ void setup()
 
   if (generatefreq) 
   {
-    Serial1.print("<generating freq start>");
+    Serial.print("<generating freq start>");
     GenerateArbitraryFreq(midi_to_pot,400.0, 0.5, f1, f2);
     delay(120000);
-    Serial1.print("<generating freq end>");
-    Serial1.flush();
+    Serial.print("<generating freq end>");
+    Serial.flush();
     return;
   }
 
@@ -3637,14 +3684,14 @@ void setup()
   midi_to_pot[vcosel*max_pot +2] = pot_vals[notestart - 1][0];
 
 
-  Serial1.print("<");
-  Serial1.print(midi_to_pot[vcosel*max_pot +2]);
-  Serial1.print(",");
-  Serial1.print(midi_to_pot[vcosel*max_pot +1]);
-  Serial1.print(",");
-  Serial1.print(midi_to_pot[vcosel*max_pot]);
-  Serial1.print(">");
-  Serial1.flush();
+  Serial.print("<");
+  Serial.print(midi_to_pot[vcosel*max_pot +2]);
+  Serial.print(",");
+  Serial.print(midi_to_pot[vcosel*max_pot +1]);
+  Serial.print(",");
+  Serial.print(midi_to_pot[vcosel*max_pot]);
+  Serial.print(">");
+  Serial.flush();
 
   float integrator;
   char charintegratorfmt[13];
@@ -3654,12 +3701,12 @@ void setup()
   SetNotePots(pots,midi_to_pot,0,vcosel);
 
 
-  Serial1.print("<midi_to_pot:");
-  Serial1.print(midi_to_pot[vcosel*max_pot +2]);
-  Serial1.print(midi_to_pot[vcosel*max_pot +1]);
-  Serial1.print(midi_to_pot[vcosel*max_pot]);
-  Serial1.print(">");
-  Serial1.flush();
+  Serial.print("<midi_to_pot:");
+  Serial.print(midi_to_pot[vcosel*max_pot +2]);
+  Serial.print(midi_to_pot[vcosel*max_pot +1]);
+  Serial.print(midi_to_pot[vcosel*max_pot]);
+  Serial.print(">");
+  Serial.flush();
 
 
   notefreq = pgm_read_float(&(notes_freq[notestart-1]));
@@ -3687,8 +3734,8 @@ void setup()
     //Serial1.print(closechar);
     checkserial();
     sprintf(printcharfreq,"<F%s>", charfreq);
-    Serial1.print(printcharfreq);
-    Serial1.flush();
+    Serial.print(printcharfreq);
+    Serial.flush();
 
     if (!checknotes && !checknotes_formula) 
     {
@@ -3716,13 +3763,13 @@ void setup()
       MaxVcoPots(pots,midi_to_pot,1);
       GenerateArbitraryFreq(midi_to_pot,notefreq, 0.75, f1, f2);
       //test delay(2000);
-      Serial1.print("<Generated_f1=");
-      Serial1.print(String(f1,3));
-      Serial1.print(">");
-      Serial1.print("<Generated_f2=");
-      Serial1.print(String(f2,3));
-      Serial1.print(">");
-      Serial1.flush();
+      Serial.print("<Generated_f1=");
+      Serial.print(String(f1,3));
+      Serial.print(">");
+      Serial.print("<Generated_f2=");
+      Serial.print(String(f2,3));
+      Serial.print(">");
+      Serial.flush();
       
 
       //digitalWrite(vco_pin,0);
@@ -3736,10 +3783,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTune(pots,midi_to_pot,notestart,notefreq,f2,0,1,1);
          tuneend = millis() - tunestart;
-         Serial1.print("<TUNETIME=");
-         Serial1.print(tuneend);
-         Serial1.print(">");
-         Serial1.flush();
+         Serial.print("<TUNETIME=");
+         Serial.print(tuneend);
+         Serial.print(">");
+         Serial.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          //CountFrequencyDeltaGlobal(50,notefreq,f_err);
       }
@@ -3749,10 +3796,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTune(pots,midi_to_pot,notestart,notefreq,f1,1,0,1);
          tuneend = millis() - tunestart;
-         Serial1.print("<TUNETIME=");
-         Serial1.print(tuneend);
-         Serial1.print(">");
-         Serial1.flush();
+         Serial.print("<TUNETIME=");
+         Serial.print(tuneend);
+         Serial.print(">");
+         Serial.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       }
       else if (f1 <= f2)
@@ -3761,10 +3808,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTune(pots,midi_to_pot,notestart,notefreq,f1,1,0,1);
          tuneend = millis() - tunestart;
-         Serial1.print("<TUNETIME=");
-         Serial1.print(tuneend);
-         Serial1.print(">");
-         Serial1.flush();
+         Serial.print("<TUNETIME=");
+         Serial.print(tuneend);
+         Serial.print(">");
+         Serial.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
    
 
@@ -3775,10 +3822,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTune(pots,midi_to_pot,notestart,notefreq,f2,0,1,1);
          tuneend = millis() - tunestart;
-         Serial1.print("<TUNETIME=");
-         Serial1.print(tuneend);
-         Serial1.print(">");
-         Serial1.flush();
+         Serial.print("<TUNETIME=");
+         Serial.print(tuneend);
+         Serial.print(">");
+         Serial.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          //CountFrequencyDeltaGlobal(50,notefreq,f_err);
       }
@@ -3795,9 +3842,9 @@ void setup()
       */
       //integrator = CountFrequencyDelta(6,1000,notefreq);
       
-      Serial1.print("<fmeas=");
-      Serial1.print(String(f_meas,3));
-      Serial1.print(">");
+      Serial.print("<fmeas=");
+      Serial.print(String(f_meas,3));
+      Serial.print(">");
       /*
       Serial1.print("<f1_meas=");
       Serial1.print(String(f1_meas,3));
@@ -3806,7 +3853,7 @@ void setup()
       Serial1.print(String(f2_meas,3));
       Serial1.print(">");
       */
-      Serial1.flush();
+      Serial.flush();
       /*
       Serial1.print("<f1err=");
       Serial1.print(String(f1_err,3));
@@ -3838,13 +3885,13 @@ void setup()
       MaxVcoPots(pots,midi_to_pot,1);
       GenerateArbitraryFreqDAC(midi_to_pot,notefreq, 0.75, f1, f2);
       //test delay(2000);
-      Serial1.print("<Generated_f1=");
-      Serial1.print(String(f1,3));
-      Serial1.print(">");
-      Serial1.print("<Generated_f2=");
-      Serial1.print(String(f2,3));
-      Serial1.print(">");
-      Serial1.flush();
+      Serial.print("<Generated_f1=");
+      Serial.print(String(f1,3));
+      Serial.print(">");
+      Serial.print("<Generated_f2=");
+      Serial.print(String(f2,3));
+      Serial.print(">");
+      Serial.flush();
       
 
       //digitalWrite(vco_pin,0);
@@ -3858,10 +3905,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,1);
          tuneend = millis() - tunestart;
-         Serial1.print("<TUNETIME=");
-         Serial1.print(tuneend);
-         Serial1.print(">");
-         Serial1.flush();
+         Serial.print("<TUNETIME=");
+         Serial.print(tuneend);
+         Serial.print(">");
+         Serial.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          //CountFrequencyDeltaGlobal(50,notefreq,f_err);
       }
@@ -3871,10 +3918,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,1);
          tuneend = millis() - tunestart;
-         Serial1.print("<TUNETIME=");
-         Serial1.print(tuneend);
-         Serial1.print(">");
-         Serial1.flush();
+         Serial.print("<TUNETIME=");
+         Serial.print(tuneend);
+         Serial.print(">");
+         Serial.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       }
       else if (f1 <= f2)
@@ -3883,10 +3930,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,1);
          tuneend = millis() - tunestart;
-         Serial1.print("<TUNETIME=");
-         Serial1.print(tuneend);
-         Serial1.print(">");
-         Serial1.flush();
+         Serial.print("<TUNETIME=");
+         Serial.print(tuneend);
+         Serial.print(">");
+         Serial.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
    
 
@@ -3897,10 +3944,10 @@ void setup()
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,1);
          tuneend = millis() - tunestart;
-         Serial1.print("<TUNETIME=");
-         Serial1.print(tuneend);
-         Serial1.print(">");
-         Serial1.flush();
+         Serial.print("<TUNETIME=");
+         Serial.print(tuneend);
+         Serial.print(">");
+         Serial.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
          //CountFrequencyDeltaGlobal(50,notefreq,f_err);
       }
@@ -3917,9 +3964,9 @@ void setup()
       */
       //integrator = CountFrequencyDelta(6,1000,notefreq);
       
-      Serial1.print("<fmeas=");
-      Serial1.print(String(f_meas,3));
-      Serial1.print(">");
+      Serial.print("<fmeas=");
+      Serial.print(String(f_meas,3));
+      Serial.print(">");
       /*
       Serial1.print("<f1_meas=");
       Serial1.print(String(f1_meas,3));
@@ -3947,8 +3994,8 @@ void setup()
     // test 
     checkserial();
     delay(10);
-    Serial1.print(charend);
-    Serial1.flush();
+    Serial.print(charend);
+    Serial.flush();
     delay(10); 
     // test       
     
@@ -4002,8 +4049,8 @@ void setup()
     }
 
 
-    Serial1.print(charackdev);
-    Serial1.flush();
+    Serial.print(charackdev);
+    Serial.flush();
     /*
     Serial1.print("<rpot2=");
     Serial1.print(rpot2);
@@ -4070,19 +4117,19 @@ void loop() {
     return;
   }
 
-  if (Serial1.available() > 0) {
+  if (Serial.available() > 0) {
 
-  char inp = Serial1.read();
+  char inp = Serial.read();
   //Serial1.println(inp);
 
     if (inp == '0') {
       vcosel = 0;
-      Serial1.println("VCOSEL 0");
+      Serial.println("VCOSEL 0");
       digitalWrite(4,HIGH);
     }
     else if(inp == '1') {
       vcosel = 1;
-      Serial1.println("VCOSEL 1");
+      Serial.println("VCOSEL 1");
       digitalWrite(4,LOW);
     }
 
@@ -4129,6 +4176,23 @@ void loop() {
     //intp2--;
     PrintDigiPot(midi_to_pot,0,2);
   }
+
+    if (inp == 't') {
+    DAC0.setValue(4095);
+    DAC1.setValue(4095);
+  }
+
+    if (inp == 'g') {
+    DAC0.setValue(2047);
+    DAC1.setValue(2047);
+  }
+
+    if (inp == 'b') {
+    DAC0.setValue(0);
+    DAC1.setValue(0);
+  }
+
+
 
     }
 
