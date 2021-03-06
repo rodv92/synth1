@@ -254,6 +254,14 @@ return R;
 
 }
 
+double hertz_to_R_DAC(double freq, double voltage) {
+
+double R;
+R = 1/(0.066E-6*freq - voltage/(3*32300)); 
+return R;
+
+}
+
 double d_hertz_to_R_v2(double freq, int subvco) {
 
 double dR;
@@ -266,7 +274,7 @@ return dR;
 double d_freq_to_d_volt(double delta_freq, int subvco) {
 
 double dV;
-dV = - delta_freq * (35000*0.066e-6)/0.32;
+dV = - delta_freq * (32300*0.066e-6)/0.32;
 
 return dV;
 
@@ -312,7 +320,7 @@ return dR;
 
 
 // convert saw freq components (subosc1 and 2 of OSC to resistance values of each timer R
-void saw_freq_duty_to_R(double freq, double duty, double &R1 , double &R2, double &f1, double &f2, int vco) {
+void saw_freq_duty_to_R(double freq, double duty, double &R1 , double &R2, double &f1, double &f2) {
 
 // if duty cycle is extreme, subosc may have to generate frequencies above or under the possible range.
 // In this case, the duty cycle is set to the max. allowable setting.
@@ -359,20 +367,74 @@ R2 = hertz_to_R(f2,1);
 
 }
 
+// convert saw freq components (subosc1 and 2 of OSC to resistance values of each timer R
+void saw_freq_duty_to_R_DAC(double freq, double voltage, double duty, double &R1 , double &R2, double &f1, double &f2) {
+
+// if duty cycle is extreme, subosc may have to generate frequencies above or under the possible range.
+// In this case, the duty cycle is set to the max. allowable setting.
+if (freq < minfreq) { freq = minfreq; }
+else if (freq > maxfreq) { freq = maxfreq; }
+
+double period = 1.0/freq;
+f1 = 1.0/(2*(duty*period));
+f2 = 1.0/(2*((1.0 - duty)*period));
+
+if (f1 < minfreq) { 
+  f1 = minfreq; 
+  duty = 1.0/(2*(f1*period));
+  f2 = 1.0/(2*((1.0 - duty)*period));
+  }
+else if (f2 < minfreq) {
+  f2 = minfreq;
+  duty = 1 - 1.0/(2*(f2*period));
+  f1 = 1.0/(2*(duty*period));
+  }
+if (f1 > maxfreq) { 
+  f1 = maxfreq;
+  duty = 1.0/(2*(f1*period));
+  f2 = 1.0/(2*((1.0 - duty)*period));
+  }
+else if (f2 > maxfreq) {
+  f2 = maxfreq;
+  duty = 1 - 1.0/(2*(f2*period));
+  f1 = 1.0/(2*(duty*period));
+  }
+/*
+Serial1.print("<f1,f2,duty,r1,r2:");
+Serial1.print(String(f1,3));
+Serial1.print(",");
+Serial1.print(String(f2,3));
+Serial1.print(",");
+Serial1.print(String(duty,3));
+Serial1.print(",");
+*/
+
+
+R1 = hertz_to_R_DAC(f1,voltage);
+R2 = hertz_to_R_DAC(f2,voltage);
+
+}
+
+
+
 void R_to_pot_DAC(double R, byte &val_pot100K, byte subvco)
 {
 
+//input : R is the resistance to distribute among the two 100K digipots.
+//input : subvco is the subvco selector (0 or 1)
+//output : &val_pot100K, reference to the serially aggregated steps of the two 100K digipots,
+// 0 to 99 = pot1/4, 100 to 199 = pot2/5. with pot1/4 being maxed out.
 
   double Rtmp;
-  const double R1OOK_total_R_vco0 = 96.77;
-  const double R1OK_total_R_vco0 = 10.08;
+  const double R1OOK_total_R_vco0 = 102.1;
+  const double R1O0Kb_total_R_vco0 = 98.9;
   const double R1K_total_R_vco0 = 1.055;
-  const double trim_pot_R_vco0 = 1.765;
+  const double trim_pot_R_vco0 = 5.19; // with added wiper_R*3
 
-  const double R1OOK_total_R_vco1 = 97.26;
-  const double R1OK_total_R_vco1 = 10.42;
+  const double R1OOK_total_R_vco1 = 105.3;
+  const double R1O0Kb_total_R_vco1 = 98;
   const double R1K_total_R_vco1 = 1.033;
-  const double trim_pot_R_vco1 = 1.349;
+  const double trim_pot_R_vco1 = 5.35; // with added wiper_R*3
 
 
   //const double wiper_R = 0.12;
@@ -380,17 +442,40 @@ void R_to_pot_DAC(double R, byte &val_pot100K, byte subvco)
 
   if (subvco == 0) {
 
-  // R is in kOhms
-  // we substract wiper resistance and trim pot resistance.
-    Rtmp = R - R1OK_total_R_vco0 - R1K_total_R_vco0 - trim_pot_R_vco0;
-    val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_vco0/99) + 0.5);
-
+    // R is in kOhms
+    // we substract wiper resistance and trim pot resistance.
+    if (Rtmp > R1O0Kb_total_R_vco0) // in this case we use all the steps of pot1 (+99)
+    {
+      Rtmp = R - R1O0Kb_total_R_vco0 - R1K_total_R_vco0 - trim_pot_R_vco0;
+      val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_vco0/99) + 0.5) + 99;
+      //(byte) int(Rtmp/(R1OOKb_total_R_vco0/99) + 0.5) + 99;
+    
+    }
+    else // only pot2 is required, pot1 stays at step 0.
+    { 
+      Rtmp = R - R1K_total_R_vco0 - trim_pot_R_vco0;
+      val_pot100K = (byte) int(Rtmp/(R1O0Kb_total_R_vco0/99) + 0.5);
+    }
+    
   }
   
   else if (subvco == 1) 
   {
-    Rtmp = R - R1OK_total_R_vco0 - R1K_total_R_vco0 - trim_pot_R_vco0;
-    val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_vco1/99) + 0.5);
+
+    if(Rtmp > R1O0Kb_total_R_vco1) // in this case we use all the steps of pot4
+    {
+      Rtmp = R - R1O0Kb_total_R_vco1 - R1K_total_R_vco1 - trim_pot_R_vco1;
+      val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_vco1/99) + 0.5) + 99;
+      //(byte) int(Rtmp/(R1OOKb_total_R_vco0/99) + 0.5) + 99;
+  
+    }
+    else // only pot5 is required, pot4 stays at step 0.
+    {
+      Rtmp = R - R1K_total_R_vco1 - trim_pot_R_vco1;
+      val_pot100K = (byte) int(Rtmp/(R1O0Kb_total_R_vco1/99) + 0.5);
+    }
+    
+
   }
 
 
@@ -535,22 +620,24 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty
   double tmp_f1b;
   double tmp_f2b;
   
-  
+  byte allR100steps_1;
   byte R100_1;
-  byte R10_1 = 99;
+  byte R100b_1;
   byte R1_1 = 99;
   
+  byte allR100steps_2;
   byte R100_2;
-  byte R10_2 = 99;
+  byte R100b_2;
   byte R1_2 = 99;
+
   byte idx0;
   byte idx1;
  
 
   byte midi_to_pot_G[6];
   // Get Closest Coarse frequency, find k.
-  coarse_freq[0][k];
-  //saw_freq_duty_to_R(freq, duty, Rvco1 , Rvco2, f1, f2 ,0);
+  //coarse_freq[0][k];
+  saw_freq_duty_to_R_DAC(freq, 1.5, duty, Rvco1 , Rvco2, f1, f2);
   //f = 1/(R*C) * (1 + (R/53000)*1.5);
   //f = 1/(R*C) + (1.5/53000)/0.66E-6;
   //1/RC = f - (1.5/53000)/0.66E-6;
@@ -564,12 +651,12 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty
   DebugPrint("R1",Rvco1,2);
   DebugPrint("R2",Rvco2,2);
 
-  // estimating coarse pot R
-  R_to_pot_DAC(Rvco1, R100_1, 0);
-  R_to_pot_DAC(Rvco2, R100_2, 1);
+  // estimating coarse pot R step
+  R_to_pot_DAC(Rvco1, allR100steps_1, 0);
+  R_to_pot_DAC(Rvco2, allR100steps_2, 1);
   
-  idx0 = 99 - R100_1;
-  idx1 = 99 - R100_2;
+  idx0 = 199 - allR100steps_1;
+  idx1 = 199 - allR100steps_2;
 
   //coarse_freq table lookup index guess...
   tmp_f1a = coarse_freq[0][idx0];
@@ -582,61 +669,73 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty
   //VCO 0
   if (tmp_f1a < f1) 
   {
-    tmp_f1b = coarse_freq[0][++idx0];
-    while (tmp_f1b < f1)
+    if (idx0 < 199)
     {
       tmp_f1b = coarse_freq[0][++idx0];
-      tmp_f1a = coarse_freq[0][idx0-1];
-    }
-    if((f1-tmp_f1a) <= (tmp_f1b -f1))
-    {
-      idx0--;
-      // set index to closest frequency
+      while ((tmp_f1b < f1) && (idx0 < 199))
+      {
+        tmp_f1b = coarse_freq[0][++idx0];
+        tmp_f1a = coarse_freq[0][idx0-1];
+      }
+      if (((f1-tmp_f1a) <= (tmp_f1b -f1)) && (idx0 <= 199))
+      {
+        idx0--;
+        // set index to closest frequency
+      }
     }
   }
   else // (tmp_f1a > f1)
   {
-    tmp_f1b = coarse_freq[0][--idx0];
-    while(tmp_f1b > f1)
+    if (idx0 > 0)
     {
       tmp_f1b = coarse_freq[0][--idx0];
-      tmp_f1a = coarse_freq[0][idx0+1];
-    }
-    if((tmp_f1a-f1) <= (f1-tmp_f1b))
-    {
-      idx0++;
-      // set index to closest frequency
+      while ((tmp_f1b > f1) && (idx0 > 0))
+      {
+        tmp_f1b = coarse_freq[0][--idx0];
+        tmp_f1a = coarse_freq[0][idx0+1];
+      }
+      if (((tmp_f1a-f1) <= (f1-tmp_f1b)) && (idx0 >= 0))
+      {
+        idx0++;
+        // set index to closest frequency
+      }
     }
   }
   //VCO 1
   if (tmp_f2a < f2) 
   {
-    tmp_f2b = coarse_freq[1][++idx1];
-    
-    while (tmp_f1b < f1)
+    if (idx1 < 199)
     {
-      tmp_f1b = coarse_freq[1][++idx1];
-      tmp_f1a = coarse_freq[1][idx1-1];
-    }
-    if((f1-tmp_f1a) <= (tmp_f1b -f1))
-    {
-      idx1--;
-      // set index to closest frequency
+      tmp_f2b = coarse_freq[1][++idx1];
+      
+      while ((tmp_f2b < f2) && (idx1 < 199))
+      {
+        tmp_f2b = coarse_freq[1][++idx1];
+        tmp_f2a = coarse_freq[1][idx1-1];
+      }
+      if (((f2-tmp_f2a) <= (tmp_f2b -f2)) && (idx1 <= 199))
+      {
+        idx1--;
+        // set index to closest frequency
+      }
     }
   }
-  else // (tmp_f1a > f1)
+  else // (tmp_f2a > f2)
   {
-    tmp_f1b = coarse_freq[1][--idx1];
+    if (idx1 > 0)
+    {
+      tmp_f2b = coarse_freq[1][--idx1];
 
-    while(tmp_f1b > f1)
-    {
-      tmp_f1b = coarse_freq[1][--idx1];
-      tmp_f1a = coarse_freq[1][idx1+1];
-    }
-    if((tmp_f1a-f1) <= (f1-tmp_f1b))
-    {
-      idx1++;
-      // set index to closest frequency
+      while ((tmp_f2b > f2) && (idx1 > 0))
+      {
+        tmp_f2b = coarse_freq[1][--idx1];
+        tmp_f2a = coarse_freq[1][idx1+1];
+      }
+      if (((tmp_f2a-f2) <= (f2-tmp_f2b)) && (idx1 >= 0))
+      {
+        idx1++;;
+        // set index to closest frequency
+      }
     }
   }
   
@@ -665,10 +764,10 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty
 
 
    midi_to_pot_G[0] = R1_1; 
-   midi_to_pot_G[1] = R10_1; 
+   midi_to_pot_G[1] = R100b_1; 
    midi_to_pot_G[2] = 99 - idx0; 
    midi_to_pot_G[3] = R1_2; 
-   midi_to_pot_G[4] = R10_2; 
+   midi_to_pot_G[4] = R100b_2; 
    midi_to_pot_G[5] = 99 - idx1; 
 
   /*
@@ -700,7 +799,7 @@ void GenerateArbitraryFreq(byte (&curr_pot_vals)[6], double freq, double duty, d
   byte midi_to_pot_G[6];
   
  
-  saw_freq_duty_to_R(freq, duty, Rvco1 , Rvco2, f1, f2 ,0);
+  saw_freq_duty_to_R(freq, duty, Rvco1 , Rvco2, f1, f2);
   
 
   DebugPrint("duty",duty,2);
@@ -3234,7 +3333,8 @@ void handleNoteOff(byte channel, byte pitch, byte velocity) {
 void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte vcosel)
 {
 
-  byte k = 0;
+  byte vco_pin = 4;
+  int k = 0;
   byte max_pot = 3;
   byte m;
   // max_pot*vcosel + 1;
@@ -3243,9 +3343,10 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[6], byte (&curr_pot_vals)[
   //int prev_data_offset = 686;
   int prev_data_offset = 0;
   
-  int tuneblock_size = 200*(sizeof(f_meas));
+  int tuneblock_size = 100*(sizeof(f_meas));
   DebugPrint("WRITE COARSE VCO:",double(vcosel),2);
-  
+  digitalWrite(vco_pin, !vcosel);
+
   for(m=max_pot*vcosel + 1;m<=max_pot*vcosel + 2;m++)
   {
     DebugPrint("RESET POT:",double(m),2);
@@ -3266,13 +3367,14 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[6], byte (&curr_pot_vals)[
     for(k=99;k>=0;k--)
     {
 
-      DebugPrint("STEP:",double(k),2);
+      //DebugPrint("STEP:",double(k),2);
       CountFrequency(50,f_meas);
-      DebugPrint("FREQ:",f_meas,2);
-      int addr = prev_data_offset + vcosel*tuneblock_size + (99-k)*(sizeof(f_meas));
+      //DebugPrint("FREQ:",f_meas,2);
+      int addr = prev_data_offset + (2*vcosel + (m -(max_pot*vcosel +1)))*tuneblock_size + (99-k)*(sizeof(f_meas));
+      DebugPrint("ADDR:",double(addr),2);
       EEPROM.put(addr,f_meas);
       //we write frequencies in increasing order
-      delay(1000);
+      //delay(1000);
       //DebugPrint("END_STEP",double(k),0);
       ptr[m]->decrease(1);
       curr_pot_vals[m]--;
@@ -3284,7 +3386,7 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[6], byte (&curr_pot_vals)[
 
 void ReadAllCoarseFrequencies()
 {
-  byte k;
+  int k;
   byte vco;
 
   //int prev_data_offset = 686;
@@ -3524,8 +3626,9 @@ void setup()
   bool checkpots = false;
   bool generatefreq = false;
   bool writecoarsefreqs = false;
+  bool testcoarsefreqsselect = true;
   midimode = false;
-  bool donothing = true;
+  bool donothing = false;
 
   byte vco_pin = 4;
   byte max_pot = 3;
@@ -3535,9 +3638,9 @@ void setup()
   //Serial1.begin(9600,SERIAL_8E2);
   if (!midimode)
   {
-    Serial1.begin(9600);
-    Serial1.print(charspeed);
-    Serial1.flush();   
+    Serial.begin(9600);
+    Serial.print(charspeed);
+    Serial.flush();   
     delay(3000);
   }
   StartAllPots(allpots);
@@ -3610,9 +3713,11 @@ void setup()
   
   if (writecoarsefreqs)
   {
+
     WriteEEPROMCoarsePotStepFrequencies(pots,midi_to_pot,0);
     WriteEEPROMCoarsePotStepFrequencies(pots,midi_to_pot,1);
     ReadAllCoarseFrequencies();
+    return;
     
   }
 
@@ -4179,17 +4284,14 @@ void loop() {
 
     if (inp == 't') {
     DAC0.setValue(4095);
-    DAC1.setValue(4095);
   }
 
     if (inp == 'g') {
     DAC0.setValue(2047);
-    DAC1.setValue(2047);
   }
 
     if (inp == 'b') {
     DAC0.setValue(0);
-    DAC1.setValue(0);
   }
 
 
@@ -4238,6 +4340,18 @@ void loop() {
     (midi_to_pot[5])--;
     //intp5--;
     PrintDigiPot(midi_to_pot,1,2); 
+  }
+
+   if (inp == 't') {
+    DAC1.setValue(4095);
+  }
+
+    if (inp == 'g') {
+    DAC1.setValue(2047);
+  }
+
+    if (inp == 'b') {
+    DAC1.setValue(0);
   }
       
     
