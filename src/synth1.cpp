@@ -358,14 +358,25 @@ void InitSinTable(float LFOFreq, int16_t SinTable[], uint16_t nb_samples)
   uint16_t sample;
   float sample_time;
   float temp_sin;
-  sample_inc = 1.0/(LFOFreq*float(nb_samples)); // sample time increment in sec
-  inv_sample_inc_micros = LFOFreq*float(nb_samples)/1E6; // in 1/µsec
+  float inv_nb_sample;
 
+  //these intervals are initialized there and used for DAC update based on LFO frequency
+  sample_inc = 1.0/(LFOFreq*float(nb_samples)); // sample time increment in sec
+  // calculate inverse of time interval. multiplication by inverse is way faster.
+  inv_sample_inc_micros = LFOFreq*float(nb_samples)/1E6; // in 1/µsec
+  
+  // sin_table is not dependent on LFO frequency. 512 sample resolution full period
+  // to do : calculate only half period, and go in reverse direction at PI, reduces table computation
+  //time by half
+  
+  // calculate inverse one time only. multiplication by inverse is way faster.
+
+  inv_nb_sample = 1.0/float(nb_samples);
   for (sample = 0; sample < nb_samples; sample++)
   {
         
-    sample_time += sample_inc;
-    temp_sin = sin(2.0*PI*LFOFreq*sample_time);
+    temp_sin = sin(2.0*PI*sample*inv_nb_sample);
+    // use commercial half step rounding.
     sin_table[sample] = ((temp_sin > 0)? (int(32767.0*temp_sin + 0.5)):(int(32767.0*temp_sin - 0.5)));
     
   }
@@ -4433,13 +4444,16 @@ void loop() {
   if (PWMActive)
   {
    // PWM mode free running. (do not update DAC state needlessly)
-   // todo : LFO 'handlenoteon' trigger mode.
+   // to do : LFO 'handlenoteon' trigger mode.
    currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
    if(currentsample != prevsample)
    {
      
+     // to do : read table in reverse direction at sample = 256, for a table of sin in [0, Pi] interval
+     // makes sin table computation take half the time than for [0, 2*Pi] interval.   
      DAC0.setValue(DAC_table[0][currentsample % 512]);
      DAC1.setValue(DAC_table[1][currentsample % 512]);
+   
    }
 
    prevsample = currentsample;
