@@ -45,10 +45,12 @@ DigiPot *allpots[7] = { &pot0 , &pot1, &pot2, &pot3, &pot4, &pot5, &pot12};
 //volatile unsigned long FallCount;
 double coarse_freq[2][200];
 
-int16_t sin_table[512];
-uint16_t DAC_table[2][512];
-float sample_inc;
-float inv_sample_inc_micros;
+int16_t sin_table[90]; // one degree resolution sin_table holding [0, Pi/2] interval
+uint16_t DAC_table[2][360]; // full period DAC_table for both suboscs
+
+// next two variables are initialized in InitSinTableOptimized
+float sample_inc; // time interval in seconds of 1 sample of LFO. (LFO Freq dependent)
+float inv_sample_inc_micros; // inverse time interval in µsec of 1 sample of LFO (LFO Freq dependent)
  
 const double notes_freq[49] PROGMEM = {
 
@@ -332,7 +334,7 @@ void Set_DAC(uint16_t dac_steps, byte subvco) {
 
 void Adjust_DAC(double delta_V, byte subvco) {
 
-  int dac_steps;
+  int16_t dac_steps;
   dac_steps = int(delta_V/(3.0/4095.0) + 0.5*(delta_V)/fabs(delta_V));
   DebugPrint("dac_steps",double(dac_steps),5);
   
@@ -351,12 +353,40 @@ void Adjust_DAC(double delta_V, byte subvco) {
 
 }
 
+void InitSinTableOptimized(float LFOFreq, int16_t SinTable[], uint16_t nb_samples)
+{
+  //compute SinTable on [0, Pi/2] interval, remaining interval [Pi/2 to 2*Pi] is obtained simply from 
+  // [0, Pi/2]
+  // nb_samples resolution to use for [0,Pi/2] for a resolution of 1 degree = nb_samples = 90
+
+  uint16_t sample;
+  float temp_sin;
+  float inv_nb_sample;
+
+  //these intervals are initialized there and used for DAC update based on LFO frequency
+  sample_inc = 1.0/(LFOFreq*4.0*float(nb_samples)); // sample time increment in sec
+  // calculate inverse of time interval. multiplication by inverse is way faster.
+  inv_sample_inc_micros = LFOFreq*4.0*float(nb_samples)/1E6; // in 1/µsec
+  
+  // calculate inverse one time only. multiplication by inverse is way faster.
+
+  inv_nb_sample = 1.0/float(nb_samples);
+  for (sample = 0; sample < nb_samples; sample++)
+  {
+        
+    temp_sin = sin(0.5*PI*sample*inv_nb_sample);
+    // side effect of [0, Pi/2] only calculation is slight positive bias due to half step rounding.
+    sin_table[sample] = (int(32767.0*temp_sin + 0.5));
+    
+  }
+
+}
+
 void InitSinTable(float LFOFreq, int16_t SinTable[], uint16_t nb_samples)
 {
   // todo : use a flash mem 4096 values table with linear interpolation and a modulo 2*pi rounded integer
   // access
   uint16_t sample;
-  float sample_time;
   float temp_sin;
   float inv_nb_sample;
 
@@ -383,24 +413,24 @@ void InitSinTable(float LFOFreq, int16_t SinTable[], uint16_t nb_samples)
 
 }
 
-float Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, float notefreq) 
+void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, float notefreq) 
 {
   //enables PWM for the oscillator by managing frequency of both subosc through DAC
   //We have to check that DutyDepth is not out of bounds of DAC range according to the noteoffset.
   float Vd;
   
   float dVmax[2];
-  float min_dVmax;
   float PWMDepthMax[2];
   float PWMDepthMaxPossible;
   float vco_freq[2];
   static float CurLFOFreq = 0;
   uint16_t sample;
+  div_t divresult;
 
   if (LFOFreq != CurLFOFreq) 
   {
     CurLFOFreq = LFOFreq;
-    InitSinTable(LFOFreq,sin_table,512);
+    InitSinTableOptimized(LFOFreq,sin_table,90);
   }
 
   vco_freq[0] = notefreq/2*DutyCenterVal;
@@ -411,14 +441,14 @@ float Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq,
   dVmax[1] = 3.0*(2047.0 - fabs(DAC_states[1] - 2047.0))/4095.0;
   //min_dVmax = min(dVmax[0],dVmax[1]);
 
-  PWMDepthMax[0] = -(2*DutyCenterVal*dVmax[0])/(2*min_dVmax + 3*32900*0.0665E-6*vco_freq[0]/DutyCenterVal);
-  PWMDepthMax[1] = -(2*DutyCenterVal*dVmax[1])/(2*min_dVmax + 3*33400*0.0665E-6*vco_freq[1]/DutyCenterVal);
+  PWMDepthMax[0] = -(2*DutyCenterVal*dVmax[0])/(2*dVmax[0] + 3*32900*0.0665E-6*vco_freq[0]/DutyCenterVal);
+  PWMDepthMax[1] = -(2*DutyCenterVal*dVmax[1])/(2*dVmax[1] + 3*33400*0.0665E-6*vco_freq[1]/DutyCenterVal);
 
   PWMDepthMaxPossible = min(PWMDepthMax[0],PWMDepthMax[1]);
 
   PWMDepth = min(PWMDepth,PWMDepthMaxPossible);
 
-
+/*
   for (sample = 0; sample < 512; sample++)
   {
   
@@ -431,12 +461,60 @@ float Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq,
   
 
   }
+  */
+
+// compute and initialize dac_tables (both subosc) for a full period, using the sintable for [0, Pi/2]
+ for (sample = 0; sample < 360; sample++)
+  {
+  
+    divresult = div(sample,90);
+    switch (divresult.quot)
+    {
+    case 0:
+      Vd = 3.0*32900*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem])) -1.0/(2.0*DutyCenterVal));
+      DAC_table[0][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
+      // are always equal to 1/f_note in PWM)
+      Vd = 3.0*33400*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem])) -1.0/(2.0*DutyCenterVal));
+      DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      break;
+    
+    case 1:
+      Vd = 3.0*32900*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal + PWMDepth*(1 -sin_table[divresult.rem]))) -1.0/(2.0*DutyCenterVal));
+      DAC_table[0][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
+      // are always equal to 1/f_note in PWM)
+      Vd = 3.0*33400*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal - PWMDepth*(1 -sin_table[divresult.rem]))) -1.0/(2.0*DutyCenterVal));
+      DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      break;
+
+    case 2:
+
+      Vd = 3.0*32900*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem])) -1.0/(2.0*DutyCenterVal));
+      DAC_table[0][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
+      // are always equal to 1/f_note in PWM)
+      Vd = 3.0*33400*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem])) -1.0/(2.0*DutyCenterVal));
+      DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      break;
+
+    case 3:
+
+      Vd = 3.0*32900*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal - PWMDepth*(1 -sin_table[divresult.rem]))) -1.0/(2.0*DutyCenterVal));
+      DAC_table[0][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
+      // are always equal to 1/f_note in PWM)
+      Vd = 3.0*33400*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal + PWMDepth*(1 -sin_table[divresult.rem]))) -1.0/(2.0*DutyCenterVal));
+      DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      break;
+    }
+
+  }
 
   PWMActive = true;
   timer2.setup();
 
 }
-
 
 
 double d_hertz_to_R(double freq, int subvco) {
@@ -807,10 +885,15 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty
 
   //Substract R10_1 and R1_1 and R_trim;
 
-
   DebugPrint("duty",duty,2);
   DebugPrint("R1",Rvco1,2);
   DebugPrint("R2",Rvco2,2);
+  
+  // Set Both DACs to center value (1.5V)
+  Set_DAC(2047,0);
+  Set_DAC(2047,1);
+  
+
 
   // estimating coarse pot R step
   R_to_pot_DAC(Rvco1, allR100steps_1, 0);
@@ -3474,7 +3557,10 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   MaxVcoPots(pots,midi_to_pot,0);
   MaxVcoPots(pots,midi_to_pot,1);
   //MIDI.sendNoteOn(46, 127, 1);
+  
+  // Set pots for coarse tuning and set both DACs to half deflection setpoint (2047) 
   GenerateArbitraryFreqDAC(midi_to_pot,notefreq, duty, f1, f2);
+  
   //MIDI.sendNoteOn(47, 127, 1);
 
   // f1 = high , f2 = low
