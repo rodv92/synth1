@@ -22,7 +22,7 @@ MCP4725 DAC1(0x61);
 
 MIDI_CREATE_DEFAULT_INSTANCE();
 
-byte DebugLevel = 0;
+byte DebugLevel = 2;
 
 DigiPot pot0(2,3,40);
 DigiPot pot1(2,3,42);
@@ -271,15 +271,19 @@ double R; // R in kOhms.
 
 if(!subvco)
 {
-  R = 1.0/(0.0665E-6*freq - (1.0/32900.0)*(1.0-(voltage/3.0)));
+  R = 1.0/(0.0665E-6*freq - (1.0/33000.0)*(1.0-(voltage/3.0)));
 }
 else
 {
-  R = 1.0/(0.0665E-6*freq - (1.0/33400.0)*(1.0-(voltage/3.0)));
+  R = 1.0/(0.0665E-6*freq - (1.0/33000.0)*(1.0-(voltage/3.0)));
 }
  
  //R = 1/(fC - (1/R_c)*(1 - Vc/3))
-if(R < 0.0)  {R = R/0.0;} // assign NaN to R, unobtainable frequency through R without upping voltage.
+if(R < 0.0)  
+  {
+    R = R/0.0;
+    DebugPrintToken("R_INF",4);
+  } // assign NaN to R, unobtainable frequency through R without upping voltage.
 
 return (R/1000.0);
 
@@ -300,11 +304,11 @@ double dV;
 
 if(!subvco)
 {
-  dV = delta_freq * (32900*0.0665e-6)/0.32;
+  dV = delta_freq * (33000*0.0665e-6)/0.32;
 }
 else
 {
-  dV = delta_freq * (33400*0.0665e-6)/0.32;
+  dV = delta_freq * (33000*0.0665e-6)/0.32;
 }
 
 
@@ -418,11 +422,15 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
   //enables PWM for the oscillator by managing frequency of both subosc through DAC
   //We have to check that DutyDepth is not out of bounds of DAC range according to the noteoffset.
   float Vd;
-  
+  float DACdtmp;
+  int16_t DACd;
+  float DAC_gain[2];
+  float DAC_cor[2];
   float dVmax[2];
   float PWMDepthMax[2];
   float PWMDepthMaxPossible;
-  float vco_freq[2];
+  //float vco_freq[2];
+  float DutyCenterValCmp = 1 - DutyCenterVal;
   static float CurLFOFreq = 0;
   uint16_t sample;
   div_t divresult;
@@ -433,35 +441,58 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
     InitSinTableOptimized(LFOFreq,sin_table,90);
   }
 
-  vco_freq[0] = notefreq/2*DutyCenterVal;
-  vco_freq[1] = notefreq/(2*(1.0 - DutyCenterVal));
-
+  //vco_freq[0] = notefreq/2*DutyCenterVal;
+  //vco_freq[1] = notefreq/(2*(1.0 - DutyCenterVal));
+  
+  
+  //DebugPrint("vco_freq[0]",vco_freq[0],4);
+  //DebugPrint("vco_freq[1]",vco_freq[1],4);
+  
   // get max voltage deflection from current offset, and get max possible DutyDepth;
   dVmax[0] = 3.0*(2047.0 - fabs(DAC_states[0]- 2047.0))/4095.0;
   dVmax[1] = 3.0*(2047.0 - fabs(DAC_states[1] - 2047.0))/4095.0;
+  DebugPrint("DAC_states[0]",DAC_states[0],0);
+  DebugPrint("DAC_states[1]",DAC_states[1],0);
+ 
+  DebugPrint("dVmax[0]",dVmax[0],3);
+  DebugPrint("dVmax[1]",dVmax[1],3);
+  
+  
   //min_dVmax = min(dVmax[0],dVmax[1]);
 
-  PWMDepthMax[0] = -(2*DutyCenterVal*dVmax[0])/(2*dVmax[0] + 3*32900*0.0665E-6*vco_freq[0]/DutyCenterVal);
-  PWMDepthMax[1] = -(2*DutyCenterVal*dVmax[1])/(2*dVmax[1] + 3*33400*0.0665E-6*vco_freq[1]/DutyCenterVal);
+  PWMDepthMax[0] = (2*DutyCenterVal*dVmax[0])/(2*dVmax[0] + 3.0*33000*0.0665E-6*notefreq/DutyCenterVal);
+  PWMDepthMax[1] = (2*DutyCenterValCmp*dVmax[1])/(2*dVmax[1] + 3.0*33000*0.0665E-6*notefreq/DutyCenterValCmp);
+  DebugPrint("PWMDepthMax[0]",PWMDepthMax[0],3);
+  DebugPrint("PWMDepthMax[1]",PWMDepthMax[1],3);
+  
+
 
   PWMDepthMaxPossible = min(PWMDepthMax[0],PWMDepthMax[1]);
 
   PWMDepth = min(PWMDepth,PWMDepthMaxPossible);
+  DebugPrint("PWMDepth",PWMDepth,3);
+  
 
 /*
   for (sample = 0; sample < 512; sample++)
   {
   
-    Vd = 3.0*32900*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[sample])) -1.0/(2.0*DutyCenterVal));
+    Vd = 3.0*33000*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[sample])) -1.0/(2.0*DutyCenterVal));
     DAC_table[0][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
     // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
     // are always equal to 1/f_note in PWM)
-    Vd = 3.0*33400*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[(256 + sample) % 512])) -1.0/(2.0*DutyCenterVal));
+    Vd = 3.0*33000*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[(256 + sample) % 512])) -1.0/(2.0*DutyCenterVal));
     DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
   
 
   }
   */
+
+DAC_gain[0] = -9.169;
+DAC_gain[1] = -9.184;
+DAC_cor[0] = 5.25;
+DAC_cor[1] = 1.673;
+
 
 // compute and initialize dac_tables (both subosc) for a full period, using the sintable for [0, Pi/2]
  for (sample = 0; sample < 360; sample++)
@@ -471,41 +502,73 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
     switch (divresult.quot)
     {
     case 0:
-      Vd = 3.0*32900*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem])) -1.0/(2.0*DutyCenterVal));
-      DAC_table[0][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
+      DACdtmp = DAC_gain[0]*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal)) + DAC_cor[0];
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      DAC_table[0][sample] = constrain(DACd + DAC_states[0],0,4095);
+      
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
-      Vd = 3.0*33400*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem])) -1.0/(2.0*DutyCenterVal));
-      DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
+      DACdtmp = DAC_gain[1]*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) + DAC_cor[1];
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      DAC_table[1][sample] = constrain(DACd + DAC_states[1],0,4095);
+      
       break;
     
     case 1:
-      Vd = 3.0*32900*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal + PWMDepth*(1 -sin_table[divresult.rem]))) -1.0/(2.0*DutyCenterVal));
-      DAC_table[0][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
+      DACdtmp = DAC_gain[0]*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal)) + DAC_cor[0];
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      DAC_table[0][sample] = constrain(DACd + DAC_states[0],0,4095);
+     
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
-      Vd = 3.0*33400*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal - PWMDepth*(1 -sin_table[divresult.rem]))) -1.0/(2.0*DutyCenterVal));
-      DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
+      DACdtmp = DAC_gain[1]*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) + DAC_cor[1];
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      DAC_table[1][sample] = constrain(DACd + DAC_states[1],0,4095);
+     
       break;
 
     case 2:
 
-      Vd = 3.0*32900*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem])) -1.0/(2.0*DutyCenterVal));
-      DAC_table[0][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
+      DACdtmp = DAC_gain[0]*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal)) + DAC_cor[0];
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      DAC_table[0][sample] = constrain(DACd + DAC_states[0],0,4095);
+    
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
-      Vd = 3.0*33400*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem])) -1.0/(2.0*DutyCenterVal));
-      DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
+      DACdtmp = DAC_gain[1]*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) + DAC_cor[1];
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      DAC_table[1][sample] = constrain(DACd + DAC_states[1],0,4095);
+     
       break;
 
     case 3:
 
-      Vd = 3.0*32900*0.0665E-6*vco_freq[0]*(1.0/(2.0*(DutyCenterVal - PWMDepth*(1 -sin_table[divresult.rem]))) -1.0/(2.0*DutyCenterVal));
-      DAC_table[0][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
+      DACdtmp = DAC_gain[0]*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal)) + DAC_cor[0];
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[0]),0,4095);
+      DAC_table[0][sample] = constrain(DACd + DAC_states[0],0,4095);
+      
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
-      Vd = 3.0*33400*0.0665E-6*vco_freq[1]*(1.0/(2.0*(DutyCenterVal + PWMDepth*(1 -sin_table[divresult.rem]))) -1.0/(2.0*DutyCenterVal));
-      DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
+      DACdtmp = DAC_gain[1]*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) + DAC_cor[1];
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[1]),0,4095);
+      DAC_table[1][sample] = constrain(DACd + DAC_states[1],0,4095);
+   
       break;
     }
 
@@ -514,6 +577,13 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
   PWMActive = true;
   timer2.setup();
 
+}
+
+void Disable_PWM_Mod_by_LFO()
+{
+  Set_DAC(DAC_states[0],0);
+  Set_DAC(DAC_states[1],1);
+  timer2.unsetup();
 }
 
 
@@ -851,18 +921,18 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty
   double tmp_f1b;
   double tmp_f2b;
   
-  byte allR100steps_1;
-  byte R100_1;
-  byte R100b_1;
-  byte R1_1 = 99;
+  uint8_t allR100steps_1;
+  //uint8_t R100_1;
+  //uint8_t R100b_1;
+  uint8_t R1_1 = 99;
   
-  byte allR100steps_2;
-  byte R100_2;
-  byte R100b_2;
-  byte R1_2 = 99;
+  uint8_t allR100steps_2;
+  //uint8_t R100_2;
+  //uint8_t R100b_2;
+  uint8_t R1_2 = 99;
 
-  byte idx0;
-  byte idx1;
+  uint8_t idx0;
+  uint8_t idx1;
  
 
   byte midi_to_pot_G[6];
@@ -888,6 +958,8 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty
   DebugPrint("duty",duty,2);
   DebugPrint("R1",Rvco1,2);
   DebugPrint("R2",Rvco2,2);
+
+  //Check for R value special cases
   
   // Set Both DACs to center value (1.5V)
   Set_DAC(2047,0);
@@ -896,9 +968,24 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty
 
 
   // estimating coarse pot R step
-  R_to_pot_DAC(Rvco1, allR100steps_1, 0);
-  R_to_pot_DAC(Rvco2, allR100steps_2, 1);
-
+  if (isinf(Rvco1)) 
+  { 
+    allR100steps_1 = 199;
+  }
+  else
+  {
+    R_to_pot_DAC(Rvco1, allR100steps_1, 0);
+  }
+  
+  if (isinf(Rvco2)) 
+  { 
+    allR100steps_2 = 199;
+  }
+  else
+  {
+    R_to_pot_DAC(Rvco2, allR100steps_2, 1);
+  }
+  
   DebugPrint("allR100steps_0", double(allR100steps_1), 2);
   DebugPrint("allR100steps_1",double(allR100steps_2), 2);
 
@@ -913,7 +1000,11 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[6], double freq, double duty
   //coarse_freq table lookup index guess...
   tmp_f1a = coarse_freq[0][idx0];
   tmp_f2a = coarse_freq[1][idx1];
-  
+
+  DebugPrint("f0_est",tmp_f1a,2);
+  DebugPrint("f1_est",tmp_f2a,2);
+
+
   //try to bracket the frequency between two steps without reading the whole array using estimated R step.
   // using sliding window, then select idx based on closest coarse frequency to required component frequency
   
@@ -1366,6 +1457,7 @@ unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
 
 	//unsigned long startMicros = timer2.get_count();
   unsigned long count = 0;
+  unsigned long start;
 
 	// wait for any previous pulse to end
 	while ((*portInputRegister(port) & bit) == stateMask) {
@@ -1382,7 +1474,7 @@ unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
     //if (timer2.get_count() - startMicros > timeout)
 			//return 0;    
 	}
-	unsigned long start = timer2.get_count();
+	start = timer2.get_count();
   count = 0;
 	// wait for the pulse to stop
 	while ((*portInputRegister(port) & bit) == stateMask) {
@@ -1443,6 +1535,7 @@ void CountFrequency(byte samplesnumber, double &f_meas)
   if ((countlow >0) && (counthigh>0))
   {
     f_total_measured = 2000000.0/((sumhigh/counthigh) + (sumlow/countlow));
+    //DebugPrint("ftm",f_total_measured,0);
     //f_err_calc = tunefrequency*1.55005013e-03 -1.45261187e-01;
     f_err_calc = f_total_measured*1.36503806e-03 -7.58951531e-02;
     f_meas = f_total_measured + f_err_calc;  
@@ -1819,6 +1912,52 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
       
   
   } // end else (!globaltune)
+
+}
+
+
+void Generate_dV_to_dHz_Table(byte (&curr_pot_vals)[6],double center_freq, int subvco)
+{
+  double f1;
+  double f2;
+  int i;
+  double f_meas;
+  double base_f_meas;
+  double duty;
+  byte vco_pin = 4;
+
+  f1 = 0.0;
+  f2 = 0.0;
+  f_meas = 0.0;
+  duty = 0.5;
+
+  GenerateArbitraryFreqDAC(curr_pot_vals, center_freq, duty, f1, f2);
+  DebugPrint("dV_dHz DAC:",double(subvco),0);
+  //delay(10000);
+  digitalWrite(vco_pin, !subvco);
+  Set_DAC(0,subvco);
+  delay(10);
+  CountFrequency(100,f_meas);
+  base_f_meas = f_meas;
+  char charfmeas[8];
+  DebugPrint("base_f_meas:", base_f_meas, 0);
+
+  for (i=0;i<4095;i++)
+  {
+    Set_DAC(i,subvco);
+    CountFrequency(10,f_meas);
+    f_meas -= base_f_meas;
+    dtostrf(f_meas, 7, 2, charfmeas);
+    DebugPrintStr("[",0);
+    DebugPrintStr(String(i),0);
+    DebugPrintStr(",",0);
+    Serial.print(charfmeas);
+    Serial.flush();
+    DebugPrintStr("]",0);
+    DebugPrintStr("\n",0);
+    
+  }
+
 
 }
 
@@ -2454,6 +2593,7 @@ void NewAutoTuneDAC(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, d
   byte max_pot = 3;
   // if minfreq, set it right away
 
+/*
   if (freq == minfreq)
   {
     MaxVcoPots(ptr,curr_pot_vals,val_vco);
@@ -2465,7 +2605,7 @@ void NewAutoTuneDAC(DigiPot *ptr[6], byte (&curr_pot_vals)[6], byte noteindex, d
     //if (globaltune != true) {InTuning = false;}
     return;
   }
-
+*/
   int num_integrations = 0;
   int max_integrations = 90;
   int states[max_integrations][3];
@@ -3648,12 +3788,12 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[6], byte (&curr_pot_vals)[
   int prev_data_offset = 0;
   
   int tuneblock_size = 100*(sizeof(f_meas));
-  DebugPrint("WRITE COARSE VCO:",double(vcosel),2);
+  //DebugPrint("WRITE COARSE VCO:",double(vcosel),2);
   digitalWrite(vco_pin, !vcosel);
 
   for(m=max_pot*vcosel + 1;m<=max_pot*vcosel + 2;m++)
   {
-    DebugPrint("RESET POT:",double(m),2);
+    //DebugPrint("RESET POT:",double(m),2);
     for(k=0;k<100;k++)
     {
       ptr[m]->increase(1);
@@ -3666,12 +3806,14 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[6], byte (&curr_pot_vals)[
 
   for(m=max_pot*vcosel + 1;m<=max_pot*vcosel + 2;m++)
   {
-    DebugPrint("WRITE COARSE POT:",double(m),2);
+    //DebugPrint("WRITE COARSE POT:",double(m),2);
   
     for(k=99;k>=0;k--)
     {
 
-      //DebugPrint("STEP:",double(k),2);
+      DebugPrint("STEP:",double(k),2);
+      Serial.println("");
+      Serial.flush();
       CountFrequency(50,f_meas);
       //DebugPrint("FREQ:",f_meas,2);
       int addr = prev_data_offset + (2*vcosel + (m -(max_pot*vcosel +1)))*tuneblock_size + (99-k)*(sizeof(f_meas));
@@ -3679,7 +3821,7 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[6], byte (&curr_pot_vals)[
       EEPROM.put(addr,f_meas);
       //we write frequencies in increasing order
       //delay(1000);
-      //DebugPrint("END_STEP",double(k),0);
+      //DebugPrint("END_STEP",double(k),2);
       ptr[m]->decrease(1);
       curr_pot_vals[m]--;
 
@@ -3717,7 +3859,7 @@ void ReadAllCoarseFrequencies()
   {
     for (k=0;k<200;k++) 
     {
-      // DebugPrint(String(k),coarse_freq[vco][k],2);
+      DebugPrint(String(k),coarse_freq[vco][k],5);
       // we had written frequencies in increasing order
     }
 
@@ -3808,7 +3950,7 @@ all_pot_devs++;
 
 
 
-
+/*
 void checkserial()
 {
 if (!Serial) {
@@ -3819,7 +3961,7 @@ Serial1.begin(9600);
 }
 
 }
-
+*/
 
 void recvWithEndMarker() {
   static byte ndx = 0;
@@ -3830,7 +3972,7 @@ void recvWithEndMarker() {
   if (Serial.available() > 0) {
     while (Serial.available() > 0 && newData == false) {
       rc = Serial.read();
-      delay(10);
+      //delay(10);
       //Serial1.println(rc);
       if (rc != endMarker) {
         receivedChars[ndx] = rc;
@@ -3907,12 +4049,9 @@ void setup()
 
    DAC0.begin();
    DAC1.begin();
-   DAC0.setValue(2047); //half deflection of 4095
-   DAC_states[0] = 2047;
-   DAC1.setValue(2047); //half deflection of 4095
-   DAC_states[1] = 2047;
+   Set_DAC(2047,0);
+   Set_DAC(2047,1);
    
- 
   //char charstart[4] = "<F>";
   char charend[4] = "<E>";
   char charackdev[4] = "<D>";
@@ -3929,9 +4068,12 @@ void setup()
   bool checknotes = false;
   bool checknotes_formula = false;
   bool checknotes_formula_DAC = true;
+  bool checkPWM_LFO = true;
   bool checkpots = false;
   bool generatefreq = false;
+  bool generatedVdHzTable = false;
   bool writecoarsefreqs = false;
+  bool readcoarsefreqs = false;
   midimode = false;
   bool donothing = false;
 
@@ -3939,10 +4081,15 @@ void setup()
   byte max_pot = 3;
   byte notestart;
   byte noteend;
+
+  long currentsample = 0;
+  long prevsample = 0;
+      
    
   //Serial1.begin(9600,SERIAL_8E2);
   if (!midimode)
   {
+    //Serial.begin(2400,SERIAL_8E2);
     Serial.begin(9600);
     Serial.print(charspeed);
     Serial.flush();   
@@ -3974,7 +4121,7 @@ void setup()
   pot12.increase(99);
   delay(5000);
 
-  pot12.decrease(3);
+  //pot12.decrease(30);
   
 
   byte pot_vals[49][3];
@@ -4025,6 +4172,16 @@ void setup()
     return;
     
   }
+
+  if (readcoarsefreqs)
+  {
+
+    ReadAllCoarseFrequencies();
+    return;
+    
+  }
+  
+
 
   if (dumpeeprom) 
   {   
@@ -4085,7 +4242,7 @@ void setup()
     return;
   }
 
-  notestart = 20;
+  notestart = 1;
   noteend = 49;
 
 
@@ -4130,12 +4287,11 @@ void setup()
   */
 
   //FreqCount.begin(1000);
-  if (checknotes_formula_DAC) 
+  if ((checknotes_formula_DAC) || (generatedVdHzTable)) 
   {
     ReadAllCoarseFrequencies(); // populating global coarse_freq array fromEEPROM
   }  
-
-
+  
   for (k=notestart;k<noteend;k++) 
   {
     notefreq = pgm_read_float(&(notes_freq[k]));
@@ -4145,10 +4301,21 @@ void setup()
     //Serial1.print(openchar);
     //Serial1.print(charfreq);
     //Serial1.print(closechar);
-    checkserial();
+    //checkserial();
     sprintf(printcharfreq,"<F%s>", charfreq);
     Serial.print(printcharfreq);
     Serial.flush();
+
+    if (generatedVdHzTable)
+    {
+      MaxVcoPots(pots,midi_to_pot,0);
+      MaxVcoPots(pots,midi_to_pot,1);
+      DebugPrintStr("POTS MAXED",0);
+      delay(10000);
+      Generate_dV_to_dHz_Table(midi_to_pot,notefreq,0);
+      Generate_dV_to_dHz_Table(midi_to_pot,notefreq,1);
+      continue;
+    }
 
     if (!checknotes && !checknotes_formula && !checknotes_formula_DAC) 
     {
@@ -4171,10 +4338,10 @@ void setup()
       f1_meas = 0.0;
       f2_meas = 0.0;
       f_err = 0.0;
-      duty = 0.75;
+      duty = 0.5;
       MaxVcoPots(pots,midi_to_pot,0);
       MaxVcoPots(pots,midi_to_pot,1);
-      GenerateArbitraryFreq(midi_to_pot,notefreq, 0.75, f1, f2);
+      GenerateArbitraryFreq(midi_to_pot,notefreq, 0.5, f1, f2);
       //test delay(2000);
       Serial.print("<Generated_f1=");
       Serial.print(String(f1,3));
@@ -4293,10 +4460,10 @@ void setup()
       f1_meas = 0.0;
       f2_meas = 0.0;
       f_err = 0.0;
-      duty = 0.75;
+      duty = 0.5;
       MaxVcoPots(pots,midi_to_pot,0);
       MaxVcoPots(pots,midi_to_pot,1);
-      GenerateArbitraryFreqDAC(midi_to_pot,notefreq, 0.75, f1, f2);
+      GenerateArbitraryFreqDAC(midi_to_pot,notefreq, duty, f1, f2);
       //test delay(2000);
       Serial.print("<Generated_f1=");
       Serial.print(String(f1,3));
@@ -4312,6 +4479,8 @@ void setup()
       //if (duty > 0.5) { level = !level; arb_vcosel = !arb_vcosel;}
       tunestart = millis();
       // f1 = high , f2 = low
+
+      // to do : check if that section is still required.
       if ((f1 == minfreq) || (f1 == maxfreq))
       {
          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,0);
@@ -4337,6 +4506,7 @@ void setup()
          Serial.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
       }
+      // end check if that section is still required.
       else if (f1 <= f2)
       {
          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,0);
@@ -4380,37 +4550,19 @@ void setup()
       Serial.print("<fmeas=");
       Serial.print(String(f_meas,3));
       Serial.print(">");
-      /*
-      Serial1.print("<f1_meas=");
-      Serial1.print(String(f1_meas,3));
-      Serial1.print(">");
-      Serial1.print("<f2_meas=");
-      Serial1.print(String(f2_meas,3));
-      Serial1.print(">");
-      */
-      Serial1.flush();
-      /*
-      Serial1.print("<f1err=");
-      Serial1.print(String(f1_err,3));
-      Serial1.print(">");
-      Serial1.print("<f2err=");
-      Serial1.print(String(f2_err,3));
-      Serial1.print(">");
-      */
-      /*
-      dtostrf(integrator, 10, 3, charintegrator);
-      sprintf (charintegratorfmt, "<INTEG:%s>",charintegrator);
-      Serial1.print(charintegratorfmt);
-      */  
-
+      Serial.flush();
+     
     } // end check notes formula DAC
     // test 
-    checkserial();
-    delay(10);
-    Serial.print(charend);
-    Serial.flush();
-    delay(10); 
-    // test       
+    if (!checkPWM_LFO)
+    {
+      //checkserial();
+      //delay(10);
+      Serial.print(charend);
+      Serial.flush();
+      delay(10); 
+    }
+      // test       
     
     //Serial1.print("T,");
     //Serial1.print(String(notefreq));
@@ -4421,14 +4573,71 @@ void setup()
     //Serial1.print(",");
     //Serial1.print(String(midi_to_pot[2]));
     //Serial1.println("");
+
+    if (checkPWM_LFO)
+    {
+      float PWMDepth = 0.1;
+      Enable_PWM_Mod_by_LFO(PWMDepth,0.5,0.1,notefreq);
+      int i;
+      /*
+      delay(5);
+      DebugPrintToken("DACTABLE_0:",3);
+      for (i=0; i<360; i++)
+      {
+        DebugPrint(String(i),DAC_table[0][i],3);
+        delay(100);       
+      }
+      delay(5);
+      DebugPrintToken("DACTABLE_1:",3);
+      for (i=0; i<360; i++)
+      {
+        DebugPrint(String(i),DAC_table[1][i],3);
+        delay(100);       
+      }
+      */
+      //checkserial();
+      //delay(10);
+      Serial.print(charend);
+      Serial.flush();
+      //delay(10); 
+  
+    }  
+
     bool getdeviation = false;
     float deviation;
-    
-
+    bool switchvco = false;
+      
     while(!getdeviation) 
     {
       recvWithEndMarker();
       //Serial1.println("devloop");
+      if (checkPWM_LFO)
+      {
+        
+        // PWM mode free running. (do not update DAC state needlessly)
+        // to do : LFO 'handlenoteon' trigger mode.
+        currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
+        if(currentsample != prevsample)
+        {
+          
+          DAC0.setValue(DAC_table[0][currentsample % 360]);
+          //delayMicroseconds(1000);
+          DAC1.setValue(DAC_table[1][currentsample % 360]);
+        /*
+        if ((currentsample % 720) == 0)
+        {
+          DebugPrint("VCO:",double(switchvco),3);
+          digitalWrite(vco_pin, switchvco);
+          switchvco = !switchvco;
+        } 
+        */
+
+
+        }
+        
+        prevsample = currentsample;
+      }
+
       if (newData == true) 
       {
         //Serial1.println("<yesdata>");
@@ -4440,9 +4649,11 @@ void setup()
         newData = false;
         getdeviation = true;             
       }
-      delay(10);
+      //delay(10);
       //Serial1.println("<nodata>");
     }
+
+    if (checkPWM_LFO) {Disable_PWM_Mod_by_LFO();}
     delay(1000);
     
     readEEPROMpots (k, &rpot2, &rpot1, &rpot0, &olddeviation, vcosel);
@@ -4494,7 +4705,6 @@ void setup()
 
   } // end for notes
 
-
     //FreqCount.end();
 
   /*
@@ -4522,7 +4732,7 @@ void setup()
 // flip the pin #0 up and down
 
 void loop() {
-
+  
   //delay(10);
   static long currentsample = 0;
   static long prevsample = 0;
@@ -4535,10 +4745,8 @@ void loop() {
    if(currentsample != prevsample)
    {
      
-     // to do : read table in reverse direction at sample = 256, for a table of sin in [0, Pi] interval
-     // makes sin table computation take half the time than for [0, 2*Pi] interval.   
-     DAC0.setValue(DAC_table[0][currentsample % 512]);
-     DAC1.setValue(DAC_table[1][currentsample % 512]);
+     DAC0.setValue(DAC_table[0][currentsample % 360]);
+     DAC1.setValue(DAC_table[1][currentsample % 360]);
    
    }
 
