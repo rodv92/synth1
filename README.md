@@ -23,6 +23,7 @@ Uses an autotune helper and frequency counting based on PulseIn (to measure freq
 555 timer analog Attack/Decay enveloppe generator and OTA based VCA.  
 
 Projected support :
+Adding (short-term roadmap) FreeRTOS based task scheduling (rationale : for concurrent DAC updates to overcome potential DAC update delays causing LFO aliasing/lags artifacts and general real-time responsiveness).
 Additional 4 general purpose DAC based LFOs/ADSR
 Digital control 4pole LP,BP,HP filters (one per XR2206).
 Mixing stage of both oscillators post-filter.
