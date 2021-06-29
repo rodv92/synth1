@@ -32,6 +32,14 @@ THD/Symmetry control based on vactrol control. (using XR-2206 symmetry adjust pi
 AM/vibrato/Gate control using XR2206 native AM pin
 Diode/transformer based RINGMOD.
 
+Files :
+
+src/synth1.cpp (Main Arduino firmware file)
+src/synth1-dds.cpp.bak (DAC DDS driven by secondary arduino) : DEPRECATED 
+src/tune.py (Python helper script for tuning performance measurement and individual notes WAV export)
+lib/* (Additional Arduino libraries)
+doc/ (In-depth electronic aspect of project R&D)
+
 For the PCB board prototype advancement part of the project, please refer to : https://easyeda.com/rodv92/synth1
 
 
