@@ -1,19 +1,21 @@
-#include <FreqMeasure.h> 
+//#include <FreqMeasure.h> 
 #include <DigiPotX9Cxxx.h>
 #include <Wire.h>
 #include <MCP4725.h>
 //#include <MemoryFree.h>
-#include <EEPROM.h>
+//#include <EEPROM.h>
 #include <Arduino.h>
-#include <FreqCount.h>
-#include <eRCaGuy_Timer2_Counter.h>
-#include "wiring_private.h"
+//#include <FreqCount.h>
+//#include <eRCaGuy_Timer2_Counter.h>
+//#include "wiring_private.h"
 #include "pins_arduino.h"
 #include <MIDI.h>
 #include "SPIMemory.h"
+#include <avr/dtostrf.h>
 
 
-//Adafruit_MCP23017 mcp0;
+// GPIO MCP23017 I2C Expander constructor
+Adafruit_MCP23017 mcp0;
 //Adafruit_MCP23017 mcp1;
 //Adafruit_MCP23017 mcp2;
 
@@ -21,10 +23,10 @@
 SPIFlash flash;
 
 // DAC Constructors :
-MCP4725 DAC0(0x60);  
-MCP4725 DAC1(0x61);
-MCP4725 DAC2(0x62);  
-MCP4725 DAC3(0x63);
+MCP4725 MCPDAC0(0x60);  
+MCP4725 MCPDAC1(0x61);
+MCP4725 MCPDAC2(0x62);  
+MCP4725 MCPDAC3(0x63);
 
 
 double DAC_gain[4];
@@ -35,7 +37,8 @@ MIDI_CREATE_DEFAULT_INSTANCE();
 
 byte DebugLevel = 2;
 
-// Digi Pot constructors :
+// Digi Pot constructors : (object constructor patched for MCP23017 support)
+/*
 DigiPot pot0(2,3,40);
 DigiPot pot1(2,3,42);
 DigiPot pot2(2,3,44);
@@ -51,6 +54,28 @@ DigiPot pot8(2,3,32);
 DigiPot pot9(2,3,33);
 DigiPot pot10(2,3,36);
 DigiPot pot11(2,3,37);
+*/
+
+//VCO 0-0
+DigiPot pot0(2,3,0,0,mcp0);
+DigiPot pot1(2,3,1,0,mcp0);
+DigiPot pot2(2,3,2,0,mcp0);
+
+//VCO 0-1
+DigiPot pot3(2,3,3,0,mcp0);
+DigiPot pot4(2,3,4,0,mcp0);
+DigiPot pot5(2,3,5,0,mcp0);
+
+//VCO 1-0
+DigiPot pot6(2,3,6,0,mcp0);
+DigiPot pot7(2,3,7,0,mcp0);
+DigiPot pot8(2,3,8,0,mcp0);
+
+//VCO 1-1
+DigiPot pot9(2,3,9,0,mcp0);
+DigiPot pot10(2,3,10,0,mcp0);
+DigiPot pot11(2,3,11,0,mcp0);
+
 
 
 // VOLUME POT
@@ -62,7 +87,7 @@ DigiPot *pots[12] = { &pot0 , &pot1, &pot2, &pot3, &pot4, &pot5, &pot6, &pot7, &
 DigiPot *allpots[13] = { &pot0 , &pot1, &pot2, &pot3, &pot4, &pot5, &pot6 , &pot7, &pot8, &pot9, &pot10, &pot11, &pot12};
 
 //All DACs :
-MCP4725 *allDACs[4] = { &DAC0 , &DAC1, &DAC2, &DAC3};
+MCP4725 *allDACs[4] = { &MCPDAC0 , &MCPDAC1, &MCPDAC2, &MCPDAC3};
 
 //
 
@@ -600,7 +625,7 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
   }
 
   PWMActive = true;
-  timer2.setup();
+  //timer2.setup();
 
 }
 
@@ -608,7 +633,7 @@ void Disable_PWM_Mod_by_LFO()
 {
   Set_DAC(DAC_states[0],0);
   Set_DAC(DAC_states[1],1);
-  timer2.unsetup();
+  //timer2.unsetup();
 }
 
 
@@ -1198,14 +1223,14 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[12], double freq, double dut
 
    //Change OSC freq with saw
    
-  DAC0.setValue(2047);
+  MCPDAC0.setValue(2047);
   DAC_states[0] = 2047;
-  DAC1.setValue(2047);
+  MCPDAC1.setValue(2047);
   DAC_states[1] = 2047;
 
-  DAC2.setValue(2047);
+  MCPDAC2.setValue(2047);
   DAC_states[2] = 2047;
-  DAC3.setValue(2047);
+  MCPDAC3.setValue(2047);
   DAC_states[3] = 2047;
 
 
@@ -1374,7 +1399,7 @@ for(subvco = 0; subvco < 4; subvco++)
   }
 
 } 
-
+/*
 unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
 {
 	// cache the port and bit of the pin in order to speed up the
@@ -1414,7 +1439,7 @@ unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
 	}
 	return (timer2.get_count() - start);
 }
-
+*/
 
 void CountFrequency(byte samplesnumber, double &f_meas, byte subvco)
 {
@@ -1446,13 +1471,13 @@ void CountFrequency(byte samplesnumber, double &f_meas, byte subvco)
   unsigned long pulsehigh = 0;
   unsigned long pulselow = 0;
 
-  timer2.setup();
+  //timer2.setup();
   
   while (count < samplesnumber)
   {
    
-    pulsehigh = pulseInLong2(freq_meas_pin,HIGH,100000);
-    pulselow = pulseInLong2(freq_meas_pin,LOW,100000);
+    pulsehigh = pulseIn(freq_meas_pin,HIGH,100000);
+    pulselow = pulseIn(freq_meas_pin,LOW,100000);
 
     if (pulsehigh != 0)    
     {
@@ -1468,7 +1493,7 @@ void CountFrequency(byte samplesnumber, double &f_meas, byte subvco)
     count++;
   }
  
-  timer2.unsetup();
+  //timer2.unsetup();
   
   if ((countlow >0) && (counthigh>0))
   {
@@ -1517,13 +1542,13 @@ void CountFrequencyDeltaGlobal(byte samplesnumber,float tunefrequency, double &f
   unsigned long pulsehigh = 0;
   unsigned long pulselow = 0;
 
-  timer2.setup();
+  //timer2.setup();
   
   while (count < samplesnumber)
   {
    
-    pulsehigh = pulseInLong2(freq_meas_pin,HIGH,100000);
-    pulselow = pulseInLong2(freq_meas_pin,LOW,100000);
+    pulsehigh = pulseIn(freq_meas_pin,HIGH,100000);
+    pulselow = pulseIn(freq_meas_pin,LOW,100000);
 
     if (pulsehigh != 0)    
     {
@@ -1550,7 +1575,7 @@ void CountFrequencyDeltaGlobal(byte samplesnumber,float tunefrequency, double &f
     
   }
   //interrupts();
-  timer2.unsetup();
+  //timer2.unsetup();
   
   if ((countlow >0) && (counthigh>0))
   {
@@ -1629,12 +1654,12 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
   unsigned long pulsehigh = 0;
   unsigned long pulselow = 0;
   //noInterrupts();
-  timer2.setup();
+  //timer2.setup();
   while (count < samplesnumber)
   {
    
-    pulsehigh = pulseInLong2(freq_meas_pin,HIGH,100000);
-    pulselow = pulseInLong2(freq_meas_pin,LOW,100000);
+    pulsehigh = pulseIn(freq_meas_pin,HIGH,100000);
+    pulselow = pulseIn(freq_meas_pin,LOW,100000);
 
     if (pulsehigh != 0)    
     {
@@ -1661,7 +1686,7 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
     
   }
   //interrupts();
-  timer2.unsetup();
+  //timer2.unsetup();
   if ((countlow >0) && (counthigh>0))
   {
     f_total_measured = 2000000.0/((sumhigh/counthigh) + (sumlow/countlow));
@@ -1749,14 +1774,14 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
   if (globaltune)
   {
      //MIDI.sendNoteOn(81, 127, 1);
-    timer2.setup();
+    //timer2.setup();
     //MIDI.sendNoteOn(82, 127, 1);
    
     while (count < samplesnumber)
     {
     
-      pulsehigh = pulseInLong2(freq_meas_pin,HIGH,100000);
-      pulselow = pulseInLong2(freq_meas_pin,LOW,100000);
+      pulsehigh = pulseIn(freq_meas_pin,HIGH,100000);
+      pulselow = pulseIn(freq_meas_pin,LOW,100000);
 
       if (pulsehigh != 0)    
       {
@@ -1783,7 +1808,7 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
       
     } // end while (count < samplesnumber)
 
-    timer2.unsetup();
+    //timer2.unsetup();
     if ((countlow >0) && (counthigh>0))
     {
       if (low_or_high)
@@ -1830,13 +1855,13 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
   else
   {
     //MIDI.sendNoteOn(83, 127, 1);
-    timer2.setup();
+    //timer2.setup();
     //MIDI.sendNoteOn(84, 127, 1);
    
     while (count < samplesnumber)
     {
    
-      pulse = pulseInLong2(freq_meas_pin,low_or_high,100000);
+      pulse = pulseIn(freq_meas_pin,low_or_high,100000);
     
       if (pulse != 0)
       {
@@ -1858,7 +1883,7 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
     
     } // end while (count < samplesnumber)
     //interrupts();
-    timer2.unsetup();
+    //timer2.unsetup();
 
     if (count >0) 
     {
@@ -2510,10 +2535,10 @@ void setup()
 {
 
   flash.begin();
-  DAC0.begin();
-  DAC1.begin();
-  DAC2.begin();
-  DAC3.begin();
+  MCPDAC0.begin();
+  MCPDAC1.begin();
+  MCPDAC2.begin();
+  MCPDAC3.begin();
   Set_DAC(2047,0);
   Set_DAC(2047,1);
   Set_DAC(2047,2);
@@ -2986,13 +3011,14 @@ void setup()
         
         // PWM mode free running. (do not update DAC state needlessly)
         // to do : LFO 'handlenoteon' trigger mode.
-        currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
+        currentsample = micros();
+        //currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
         if(currentsample != prevsample)
         {
           
-          DAC0.setValue(DAC_table[0][currentsample % 360]);
+          MCPDAC0.setValue(DAC_table[0][currentsample % 360]);
           //delayMicroseconds(1000);
-          DAC1.setValue(DAC_table[1][currentsample % 360]);
+          MCPDAC1.setValue(DAC_table[1][currentsample % 360]);
         /*
         if ((currentsample % 720) == 0)
         {
@@ -3111,12 +3137,13 @@ void loop() {
   {
    // PWM mode free running. (do not update DAC state needlessly)
    // to do : LFO 'handlenoteon' trigger mode.
-   currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
+   //currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
+   currentsample = micros();
    if(currentsample != prevsample)
    {
      
-     DAC0.setValue(DAC_table[0][currentsample % 360]);
-     DAC1.setValue(DAC_table[1][currentsample % 360]);
+     MCPDAC0.setValue(DAC_table[0][currentsample % 360]);
+     MCPDAC1.setValue(DAC_table[1][currentsample % 360]);
    
    }
 
@@ -3190,15 +3217,15 @@ void loop() {
   }
 
     if (inp == 't') {
-    DAC0.setValue(4095);
+    MCPDAC0.setValue(4095);
   }
 
     if (inp == 'g') {
-    DAC0.setValue(2047);
+    MCPDAC0.setValue(2047);
   }
 
     if (inp == 'b') {
-    DAC0.setValue(0);
+    MCPDAC0.setValue(0);
   }
 
 
@@ -3250,15 +3277,15 @@ void loop() {
   }
 
    if (inp == 't') {
-    DAC1.setValue(4095);
+    MCPDAC1.setValue(4095);
   }
 
     if (inp == 'g') {
-    DAC1.setValue(2047);
+    MCPDAC1.setValue(2047);
   }
 
     if (inp == 'b') {
-    DAC1.setValue(0);
+    MCPDAC1.setValue(0);
   }
       
     
