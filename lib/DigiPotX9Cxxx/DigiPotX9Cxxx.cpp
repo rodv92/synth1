@@ -33,6 +33,22 @@ DigiPot::DigiPot(uint8_t incPin, uint8_t udPin, uint8_t csPin, uint8_t addrMCP, 
 }
 
 
+void DigiPot::beginMCP()
+
+{
+
+  if (_addrMCP >= 0 && _addrMCP < MCP_UNUSED) {
+   _mcp.begin(_addrMCP);
+    //Initialize all MCP pins on current chip to OUTPUT mode
+    for (_i=0;_i<16;_i++) {
+       _mcp.pinMode(_i, OUTPUT);
+       delay(5);
+       _mcp.digitalWrite(_csPin, HIGH);
+    }
+  }
+}
+
+
 void DigiPot::begin() {
 
   //uint8_t i;
@@ -41,16 +57,19 @@ void DigiPot::begin() {
   pinMode(_csPin, OUTPUT);
   if (_addrMCP == MCP_UNUSED) {
     digitalWrite(_csPin, HIGH);
-  } else if (_addrMCP >= 0 && _addrMCP < MCP_UNUSED) {
+  } 
+  /*
+  else if (_addrMCP >= 0 && _addrMCP < MCP_UNUSED) {
    _mcp.begin(_addrMCP);
     //Initialize all MCP pins on current chip to OUTPUT mode
     for (_i=0;_i<16;_i++) {
        _mcp.pinMode(_i, OUTPUT);
-       delay(100);
+       //delay(5);
        _mcp.digitalWrite(_csPin, HIGH);
     }
-    DigiPot::reset();
+    //DigiPot::reset();
   }
+  */
 }
 
 void DigiPot::reset() {

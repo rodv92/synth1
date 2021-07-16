@@ -18,6 +18,7 @@ extern TwoWire Wire1;
 #include "SPIMemory.h"
 #include <avr/dtostrf.h>
 
+//#define cs 53
 
 // GPIO MCP23017 I2C Expander constructor
 Adafruit_MCP23017 mcp0;
@@ -25,13 +26,13 @@ Adafruit_MCP23017 mcp0;
 //Adafruit_MCP23017 mcp2;
 
 // SPI W35Q32 Flash Memory constructors :
-SPIFlash flash;
+SPIFlash flash(9);
 
 // DAC Constructors :
-MCP4725 MCPDAC0(0x60,&Wire);  
-MCP4725 MCPDAC1(0x61,&Wire);
-MCP4725 MCPDAC2(0x60,&Wire1);  
-MCP4725 MCPDAC3(0x61,&Wire1);
+//MCP4725 MCPDAC0(0x60,&Wire);  
+//MCP4725 MCPDAC1(0x61,&Wire);
+//MCP4725 MCPDAC2(0x60,&Wire1);  
+//MCP4725 MCPDAC3(0x61,&Wire1);
 MCP4728 MCPdac;
 
 
@@ -41,7 +42,7 @@ double DAC_cor[4];
 
 MIDI_CREATE_DEFAULT_INSTANCE();
 
-byte DebugLevel = 2;
+byte DebugLevel = 4;
 
 // Digi Pot constructors : (object constructor patched for MCP23017 support)
 /*
@@ -93,7 +94,7 @@ DigiPot *pots[12] = { &pot0 , &pot1, &pot2, &pot3, &pot4, &pot5, &pot6, &pot7, &
 DigiPot *allpots[13] = { &pot0 , &pot1, &pot2, &pot3, &pot4, &pot5, &pot6 , &pot7, &pot8, &pot9, &pot10, &pot11, &pot12};
 
 //All DACs :
-MCP4725 *allDACs[4] = { &MCPDAC0 , &MCPDAC1, &MCPDAC2, &MCPDAC3};
+//MCP4725 *allDACs[4] = { &MCPDAC0 , &MCPDAC1, &MCPDAC2, &MCPDAC3};
 
 //
 
@@ -119,7 +120,7 @@ uint8_t ADSR_Sustain_Level[2];
 
 uint16_t ADSR_nb_samples[2];
 
-
+byte osc2noteshift;
 
 enum ADSR_States {ADSR_Disable = 0, ADSR_Disabled, ADSR_Off, ADSR_AttackInit, ADSR_Attack, ADSR_DecayInit, ADSR_Decay, ADSR_Sustain, ADSR_ReleaseInit, ADSR_Release};
 
@@ -203,14 +204,15 @@ bool newData = false;
   void StartAllPots(DigiPot *ptr[13]) {
 
     uint8_t m = 0;
-    Serial.print("OKSP");
+    //Serial.print("OKSP");
     Serial.flush();
+    ptr[0]->beginMCP();
 
     for(m = 0; m < 13; m++) {
   
         ptr[m]->begin();
         delay(10);
-        Serial.print(m);
+        //Serial.print(m);
         Serial.flush();
     
       }
@@ -229,9 +231,12 @@ void MaxVcoPots(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte subvco) {
   
       for(k=0;k<100;k++)
       {
+        //Serial.print(k);
+        //Serial.flush();
         ptr[m]->increase(1);
-        delay(5);
+        //delay(5);
       }
+      //Serial.print(m);
       curr_pot_vals[m] = 99;
      
     }
@@ -458,7 +463,7 @@ void Adjust_DAC(int16_t dac_steps, uint8_t subvco)
   DAC_states[subvco] += dac_steps;  
   DAC_states[subvco] = constrain(DAC_states[subvco],0,4095);
   
-  if ((subvco < 4) 
+  if (subvco < 4) 
   {
     MCPdac.analogWrite(subvco,DAC_states[subvco]);
   }
@@ -470,7 +475,7 @@ void Adjust_DAC(int16_t dac_steps, uint8_t subvco)
   {
     analogWrite(DAC1, DAC_states[subvco]);
   }
-  */      
+       
 }
 
 void InitADSR(uint8_t adsr_sel, uint16_t nb_samples, uint16_t attack_millis, uint16_t decay_millis, uint16_t release_millis, uint8_t sustain_level)
@@ -842,7 +847,7 @@ R2 = hertz_to_R_DAC(f2,voltage,1);
 
 
 
-void R_to_pot_DAC(double R, byte &val_pot100K, byte subvco)
+void R_to_pot_DAC(double R, byte &val_pot100K, uint8_t subvco)
 {
 
 //input : R is the resistance to distribute among the two 100K digipots.
@@ -851,15 +856,33 @@ void R_to_pot_DAC(double R, byte &val_pot100K, byte subvco)
 // 0 to 99 = pot1/4, 100 to 199 = pot2/5. with pot1/4 being maxed out.
 
   double Rtmp;
-  const double R1OOK_total_R_vco0 = 102.1;
-  const double R1O0Kb_total_R_vco0 = 98.9;
-  const double R1K_total_R_vco0 = 1.055;
-  const double trim_pot_R_vco0 = 5.19; // with added wiper_R*3
+  // subvco0 (TR1 pin)
+  //const double R1OOK_total_R_vco0 = 102.1;
+  const double R1OOK_total_R_subvco0 = 103.2;
+  const double R1O0Kb_total_R_subvco0 = 101.2;
+  const double R1K_total_R_subvco0 = 1.055;
+  const double trim_pot_R_subvco0 = 5.19; // with added wiper_R*3
 
-  const double R1OOK_total_R_vco1 = 105.3;
-  const double R1O0Kb_total_R_vco1 = 98;
-  const double R1K_total_R_vco1 = 1.033;
-  const double trim_pot_R_vco1 = 5.35; // with added wiper_R*3
+  // subvco1 (TR2 pin)
+  //const double R1OOK_total_R_subvco1 = 105.3;
+  const double R1OOK_total_R_subvco1 = 104.3;
+  const double R1O0Kb_total_R_subvco1 = 101.1;
+  const double R1K_total_R_subvco1 = 1.033;
+  const double trim_pot_R_subvco1 = 5.35; // with added wiper_R*3
+
+
+  // subvco2 (TR1 pin)
+  const double R1OOK_total_R_subvco2 = 96.2;
+  const double R1O0Kb_total_R_subvco2 = 95.5;
+  const double R1K_total_R_subvco2 = 1.055;
+  const double trim_pot_R_subvco2 = 5.19; // with added wiper_R*3
+
+
+  // subvco3 (TR2 pin)
+  const double R1OOK_total_R_subvco3 = 92.3;
+  const double R1O0Kb_total_R_subvco3 = 98.3;
+  const double R1K_total_R_subvco3 = 1.033;
+  const double trim_pot_R_subvco3 = 5.35; // with added wiper_R*3
 
 
   //const double wiper_R = 0.12;
@@ -868,7 +891,7 @@ void R_to_pot_DAC(double R, byte &val_pot100K, byte subvco)
   if (subvco == 0) 
   {
 
-    if(R > (R1O0Kb_total_R_vco0 + R1OOK_total_R_vco0 + R1K_total_R_vco0 + trim_pot_R_vco0))
+    if(R > (R1O0Kb_total_R_subvco0 + R1OOK_total_R_subvco0 + R1K_total_R_subvco0 + trim_pot_R_subvco0))
       {val_pot100K = 199;
       DebugPrintToken("ABOVE POSSIBLE R vco0",2);
       return;
@@ -876,17 +899,17 @@ void R_to_pot_DAC(double R, byte &val_pot100K, byte subvco)
 
     // R is in kOhms
     // we substract wiper resistance and trim pot resistance.
-    if (R > R1O0Kb_total_R_vco0) // in this case we use all the steps of pot1 (+99)
+    if (R > R1O0Kb_total_R_subvco0) // in this case we use all the steps of pot1 (+99)
     {
-      Rtmp = R - R1O0Kb_total_R_vco0 - R1K_total_R_vco0 - trim_pot_R_vco0;
-      val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_vco0/99) + 0.5) + 99;
-      //(byte) int(Rtmp/(R1OOKb_total_R_vco0/99) + 0.5) + 99;
+      Rtmp = R - R1O0Kb_total_R_subvco0 - R1K_total_R_subvco0 - trim_pot_R_subvco0;
+      val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_subvco0/99) + 0.5) + 99;
+      //(byte) int(Rtmp/(R1OOKb_total_R_subvco0/99) + 0.5) + 99;
     
     }
     else // only pot2 is required, pot1 stays at step 0.
     { 
-      Rtmp = R - R1K_total_R_vco0 - trim_pot_R_vco0;
-      val_pot100K = (byte) int(Rtmp/(R1O0Kb_total_R_vco0/99) + 0.5);
+      Rtmp = R - R1K_total_R_subvco0 - trim_pot_R_subvco0;
+      val_pot100K = (byte) int(Rtmp/(R1O0Kb_total_R_subvco0/99) + 0.5);
     }
     
   }
@@ -895,30 +918,77 @@ void R_to_pot_DAC(double R, byte &val_pot100K, byte subvco)
   {
 
 
-    if(R > (R1OOK_total_R_vco1 + R1O0Kb_total_R_vco1 + R1K_total_R_vco1 + trim_pot_R_vco1))
+    if(R > (R1OOK_total_R_subvco1 + R1O0Kb_total_R_subvco1 + R1K_total_R_subvco1 + trim_pot_R_subvco1))
       {val_pot100K = 199;
       DebugPrintToken("ABOVE POSSIBLE R vco1",2);
       return;} // R value is above max R obtainable with this setup, max out pots.
 
-    if(R > R1O0Kb_total_R_vco1) // in this case we use all the steps of pot4
+    if(R > R1O0Kb_total_R_subvco1) // in this case we use all the steps of pot4
     {
-      Rtmp = R - R1O0Kb_total_R_vco1 - R1K_total_R_vco1 - trim_pot_R_vco1;
-      val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_vco1/99) + 0.5) + 99;
-      //(byte) int(Rtmp/(R1OOKb_total_R_vco0/99) + 0.5) + 99;
+      Rtmp = R - R1O0Kb_total_R_subvco1 - R1K_total_R_subvco1 - trim_pot_R_subvco1;
+      val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_subvco1/99) + 0.5) + 99;
+      //(byte) int(Rtmp/(R1OOKb_total_R_subvco0/99) + 0.5) + 99;
   
     }
     else // only pot5 is required, pot4 stays at step 0.
     {
-      Rtmp = R - R1K_total_R_vco1 - trim_pot_R_vco1;
-      val_pot100K = (byte) int(Rtmp/(R1O0Kb_total_R_vco1/99) + 0.5);
+      Rtmp = R - R1K_total_R_subvco1 - trim_pot_R_subvco1;
+      val_pot100K = (byte) int(Rtmp/(R1O0Kb_total_R_subvco1/99) + 0.5);
+    }
+
+  }
+  else if (subvco == 2) 
+  {
+
+
+    if(R > (R1OOK_total_R_subvco2 + R1O0Kb_total_R_subvco2 + R1K_total_R_subvco2 + trim_pot_R_subvco2))
+      {val_pot100K = 199;
+      DebugPrintToken("ABOVE POSSIBLE R vco1",2);
+      return;} // R value is above max R obtainable with this setup, max out pots.
+
+    if(R > R1O0Kb_total_R_subvco2) // in this case we use all the steps of pot4
+    {
+      Rtmp = R - R1O0Kb_total_R_subvco2 - R1K_total_R_subvco2 - trim_pot_R_subvco2;
+      val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_subvco2/99) + 0.5) + 99;
+      //(byte) int(Rtmp/(R1OOKb_total_R_subvco0/99) + 0.5) + 99;
+  
+    }
+    else // only pot5 is required, pot4 stays at step 0.
+    {
+      Rtmp = R - R1K_total_R_subvco2 - trim_pot_R_subvco2;
+      val_pot100K = (byte) int(Rtmp/(R1O0Kb_total_R_subvco2/99) + 0.5);
     }
     
+  }
 
+  else if (subvco == 3) 
+  {
+
+
+    if(R > (R1OOK_total_R_subvco3 + R1O0Kb_total_R_subvco3 + R1K_total_R_subvco3 + trim_pot_R_subvco3))
+      {val_pot100K = 199;
+      DebugPrintToken("ABOVE POSSIBLE R vco1",2);
+      return;} // R value is above max R obtainable with this setup, max out pots.
+
+    if(R > R1O0Kb_total_R_subvco3) // in this case we use all the steps of pot4
+    {
+      Rtmp = R - R1O0Kb_total_R_subvco3 - R1K_total_R_subvco3 - trim_pot_R_subvco3;
+      val_pot100K = (byte) int(Rtmp/(R1OOK_total_R_subvco3/99) + 0.5) + 99;
+      //(byte) int(Rtmp/(R1OOKb_total_R_subvco0/99) + 0.5) + 99;
+  
+    }
+    else // only pot5 is required, pot4 stays at step 0.
+    {
+      Rtmp = R - R1K_total_R_subvco3 - trim_pot_R_subvco3;
+      val_pot100K = (byte) int(Rtmp/(R1O0Kb_total_R_subvco3/99) + 0.5);
+    }
+    
   }
 
 
 }
 //Splits R to the settings of the three serial pots (100K, 10K, 1K)
+/*
 void R_to_pot(double R, byte &val_pot100K, byte &val_pot10K, byte &val_pot1K, byte subvco) {
 
   double Rtmp;
@@ -927,10 +997,10 @@ void R_to_pot(double R, byte &val_pot100K, byte &val_pot10K, byte &val_pot1K, by
   const double R1K_total_R_vco0 = 1.055;
   const double trim_pot_R_vco0 = 1.765;
 
-  const double R1OOK_total_R_vco1 = 97.26;
-  const double R1OK_total_R_vco1 = 10.42;
-  const double R1K_total_R_vco1 = 1.033;
-  const double trim_pot_R_vco1 = 1.349;
+  const double R1OOK_total_R_subvco1 = 97.26;
+  const double R1OK_total_R_subvco1 = 10.42;
+  const double R1K_total_R_subvco1 = 1.033;
+  const double trim_pot_R_subvco1 = 1.349;
 
 
   //const double wiper_R = 0.12;
@@ -964,30 +1034,31 @@ void R_to_pot(double R, byte &val_pot100K, byte &val_pot10K, byte &val_pot1K, by
   
   else if (subvco == 1) {
   
-    Rtmp = R - trim_pot_R_vco1;
+    Rtmp = R - trim_pot_R_subvco1;
 
-    if(Rtmp > R1OOK_total_R_vco1) 
+    if(Rtmp > R1OOK_total_R_subvco1) 
     {
 
       val_pot100K = 99;
-      Rtmp = Rtmp - R1OOK_total_R_vco1;
-      val_pot10K = (byte) constrain(int(Rtmp/(R1OK_total_R_vco1/99)),0,99);
-      Rtmp = Rtmp - val_pot10K*(R1OK_total_R_vco1/99);
-      val_pot1K = (byte) int(Rtmp/(R1K_total_R_vco1/99) + 0.5);
+      Rtmp = Rtmp - R1OOK_total_R_subvco1;
+      val_pot10K = (byte) constrain(int(Rtmp/(R1OK_total_R_subvco1/99)),0,99);
+      Rtmp = Rtmp - val_pot10K*(R1OK_total_R_subvco1/99);
+      val_pot1K = (byte) int(Rtmp/(R1K_total_R_subvco1/99) + 0.5);
     }
     else 
     {
-      val_pot100K = (byte) int(int(Rtmp/(R1OOK_total_R_vco1/99))/10)*10;
-      Rtmp = Rtmp - val_pot100K*(R1OOK_total_R_vco1/99);
-      val_pot10K = (byte) constrain(int(Rtmp/(R1OK_total_R_vco1/99)),0,99);
-      Rtmp = Rtmp - val_pot10K*(R1OK_total_R_vco1/99);
-      val_pot1K = (byte) int(Rtmp/(R1K_total_R_vco1/99) + 0.5);
+      val_pot100K = (byte) int(int(Rtmp/(R1OOK_total_R_subvco1/99))/10)*10;
+      Rtmp = Rtmp - val_pot100K*(R1OOK_total_R_subvco1/99);
+      val_pot10K = (byte) constrain(int(Rtmp/(R1OK_total_R_subvco1/99)),0,99);
+      Rtmp = Rtmp - val_pot10K*(R1OK_total_R_subvco1/99);
+      val_pot1K = (byte) int(Rtmp/(R1K_total_R_subvco1/99) + 0.5);
       
     }
 
   }
 
 }
+*/
 
 //Change OSC frequency for TRI/SAW or SINE. Supply pot vals in this order for osc1 and osc2 osc1:100K,10K,1K,osc2:100K,10K,1K.
 //Digitpot *ptr[] : array of pointers of digipots objects in the same order as pot vals.
@@ -1596,7 +1667,7 @@ void CountFrequency(byte samplesnumber, double &f_meas, byte subvco)
     f_meas = f_total_measured + f_err_calc;  
   }
 
-    DebugPrint("f_total_meas",f_meas,4);
+    DebugPrint("f_total_meas",f_meas,5);
   
 }
 
@@ -2198,9 +2269,12 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   double f2_meas = 0.0;
   double f_err = 0.0;
   double duty = 0.75;
+  double notefreq[2];
+  double osc2notefreq;
   uint8_t i;
-  byte noteindex;
-  byte midi_to_pot_G[12];
+  uint8_t noteindex;
+  uint8_t osc2noteindex;
+  uint8_t midi_to_pot_G[12];
   // restrict OSC to notes of possible frequency range
   if (pitch < 48) {
     noteindex = 0;
@@ -2211,6 +2285,10 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   else {
     noteindex = pitch - 48;
   }
+
+  osc2noteindex = noteindex + osc2noteshift;
+  osc2noteindex = constrain(osc2noteindex,0,48);
+  if (noteindex != (osc2noteindex - osc2noteshift)) { osc2noteindex = noteindex;}
 
 //MIDI.sendNoteOn(41, 127, 1);
    
@@ -2262,10 +2340,12 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   }
 
   //pot12.decrease(30);
-  notefreq = double(pgm_read_float(&(notes_freq[noteindex])));
-  
+  notefreq[0] = double(pgm_read_float(&(notes_freq[noteindex])));
+  notefreq[1] = double(pgm_read_float(&(notes_freq[osc2noteindex])));
 
-  DebugPrint("NOTEFREQ",notefreq,2);
+  DebugPrint("NOTEFREQ0",notefreq[0],2);
+  DebugPrint("NOTEFREQ1",notefreq[1],2);
+  
 
   MaxVcoPots(pots,midi_to_pot,0);
   MaxVcoPots(pots,midi_to_pot,1);
@@ -2276,62 +2356,62 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   for (i=0;i<2;i++)
   {
     // Set pots for coarse tuning and set both DACs to half deflection setpoint (2047) 
-    GenerateArbitraryFreqDAC(midi_to_pot,notefreq, duty, f1, f2, i); // O is for VCO 0 (not subvco)
+    GenerateArbitraryFreqDAC(midi_to_pot,notefreq[i], duty, f1, f2, i); // O is for VCO 0 (not subvco)
   
     //MIDI.sendNoteOn(47, 127, 1);
 
     // f1 = high , f2 = low
     if ((f1 == minfreq) || (f1 == maxfreq))
     {
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq,duty,f1,1,0,2*i);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f1,1,0,2*i);
         //MIDI.sendNoteOn(48, 127, 1);
   
         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq,duty,f2,0,1,2*i + 1);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f2,0,1,2*i + 1);
         //MIDI.sendNoteOn(49, 127, 1);
   
         //TO DO : split tuning for both VCO in a loop
-        CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
         //CountFrequencyDeltaGlobal(50,notefreq,f_err);
         //MIDI.sendNoteOn(50, 127, 1);
   
     }
     else if ((f2 == minfreq) || (f2 == maxfreq))
     {
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq,duty,f2,0,1,2*i);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f2,0,1,2*i);
         //MIDI.sendNoteOn(51, 127, 1);
   
         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq,duty,f1,1,0,2*i + 1);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f1,1,0,2*i + 1);
         //MIDI.sendNoteOn(52, 127, 1);
   
-        CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
         //MIDI.sendNoteOn(53, 127, 1);
   
     }
     else if (f1 <= f2)
     {
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq,duty,f2,0,1,2*i);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f2,0,1,2*i);
         //MIDI.sendNoteOn(54, 127, 1);
   
         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq,duty,f1,1,0,2*i + 1);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f1,1,0,2*i + 1);
         //MIDI.sendNoteOn(55, 127, 1);
   
-        CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
         //MIDI.sendNoteOn(56, 127, 1);
   
     }
     else if (f1 > f2)
     {
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq,duty,f1,1,0,2*i);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f1,1,0,2*i);
         //MIDI.sendNoteOn(57, 127, 1);
   
         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq,duty,f2,0,1,2*i + 1);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f2,0,1,2*i + 1);
         //MIDI.sendNoteOn(58, 127, 1);
   
-        CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
         //MIDI.sendNoteOn(59, 127, 1);
   
         //CountFrequencyDeltaGlobal(50,notefreq,f_err);
@@ -2363,13 +2443,14 @@ void handleNoteOff(byte channel, byte pitch, byte velocity) {
   //pot12.increase(30);
 }
 
-void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte subvco)
+void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)[12], uint8_t subvco)
 {
 
-  byte vco_pin = 4;
+  uint8_t vco0_pin = 4;
+  uint8_t vco1_pin = 5;
   int k = 0;
-  byte max_pot = 3;
-  byte m;
+  uint8_t max_pot = 3;
+  uint8_t m;
   // max_pot*subvco + 1;
   double f_meas;
 
@@ -2379,7 +2460,14 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)
   // tuneblock is for ONE potentiometer.
   int tuneblock_size = 100*(sizeof(f_meas));
   //DebugPrint("WRITE COARSE VCO:",double(subvco),2);
-  digitalWrite(vco_pin, !subvco);
+  if (subvco < 2)
+  {
+    digitalWrite(vco0_pin, !(subvco % 2));
+  }
+  else if (subvco > 2)
+  {
+    digitalWrite(vco1_pin, !(subvco % 2));
+  }
 
   flash.eraseSection(prev_data_offset + subvco*2*tuneblock_size,2*tuneblock_size);  
 
@@ -2406,10 +2494,11 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)
       DebugPrint("STEP:",double(k),2);
       Serial.println("");
       Serial.flush();
-      CountFrequency(50,f_meas, subvco);
+      CountFrequency(50, f_meas, subvco);
       //DebugPrint("FREQ:",f_meas,2);
       int addr = prev_data_offset + (2*subvco + (m -(max_pot*subvco +1)))*tuneblock_size + (99-k)*(sizeof(f_meas));
       DebugPrint("ADDR:",double(addr),2);
+      DebugPrint("FREQ:",double(f_meas),4);
       flash.writeFloat(addr,f_meas);
       //EEPROM.put(addr,f_meas);
       //we write frequencies in increasing order
@@ -2428,13 +2517,14 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)
 void ReadAllCoarseFrequencies()
 {
   int k;
-  byte vco;
+  uint8_t vco;
 
   //int prev_data_offset = 686;
   int prev_data_offset = 0;
   int tuneblock_size = 200*(sizeof(double));
   int addr;
   //double *freq;
+  DebugPrintStr("READ COARSE FREQS",4);
   
   
   for (vco=0;vco<2;vco++)
@@ -2443,6 +2533,7 @@ void ReadAllCoarseFrequencies()
     {
       addr = prev_data_offset + tuneblock_size*vco + k*(sizeof(double));
       coarse_freq[vco][k] = flash.readFloat(addr);
+      DebugPrint(String(k),coarse_freq[vco][k],4);
       //EEPROM.get(addr,*(*(coarse_freq +vco)+k));
       // we had written frequencies in increasing order
     }
@@ -2455,7 +2546,7 @@ void ReadAllCoarseFrequencies()
   {
     for (k=0;k<200;k++) 
     {
-      DebugPrint(String(k),coarse_freq[vco][k],5);
+      DebugPrint(String(k),coarse_freq[vco][k],4);
       // we had written frequencies in increasing order
     }
 
@@ -2648,7 +2739,12 @@ return integrator;
 void setup() 
 {
 
-  flash.begin();
+  bool flash_status;
+  SPI.begin();
+  //DebugPrintStr(String(flash.begin(32*1024)),4);
+  //pinMode(53,OUTPUT);
+  //digitalWrite(53,HIGH);
+  flash_status = flash.begin(MB(32));
   Wire.begin();
   Wire1.begin();
   /*
@@ -2666,16 +2762,15 @@ void setup()
     pot11.begin();
     pot12.begin();
   */
-  MCPdac.attach(Wire, 14);
-  MCPdac.attach(Wire, 14);
+  MCPdac.attach(Wire1, 14);
   MCPdac.readRegisters();
 
   MCPdac.selectVref(MCP4728::VREF::VDD, MCP4728::VREF::VDD, MCP4728::VREF::VDD, MCP4728::VREF::VDD);
   MCPdac.selectPowerDown(MCP4728::PWR_DOWN::GND_100KOHM, MCP4728::PWR_DOWN::GND_100KOHM, MCP4728::PWR_DOWN::GND_100KOHM, MCP4728::PWR_DOWN::GND_100KOHM);
   MCPdac.selectGain(MCP4728::GAIN::X1, MCP4728::GAIN::X1, MCP4728::GAIN::X1, MCP4728::GAIN::X1);
 
-  MCPdac.enable(true);
   MCPdac.readRegisters();
+  
 
 
   //MCPDAC0.begin();
@@ -2686,7 +2781,8 @@ void setup()
   Set_DAC(2047,1);
   Set_DAC(2047,2);
   Set_DAC(2047,3);
-
+  MCPdac.enable(true);
+  
   DAC_gain[0] = -9.169;
   DAC_gain[1] = -9.184;
   // modify these values after calibration
@@ -2702,6 +2798,10 @@ void setup()
   ADSR_nb_samples[0] = 1000;
   ADSR_nb_samples[1] = 1000;
 
+  ADSR_DAC_State[0] = ADSR_Disabled;
+  ADSR_DAC_State[1] = ADSR_Disabled;
+  
+
 
   //char charstart[4] = "<F>";
   char charend[4] = "<E>";
@@ -2711,7 +2811,7 @@ void setup()
   //char closechar = '>';
 
 
-  char charspeed[14] = "<SERIAL 9600>";
+  char charspeed[16] = "<SERIAL 115200>";
   char charfreq[8];
   char printcharfreq[10];
     
@@ -2722,10 +2822,10 @@ void setup()
   bool checkpots = false;
   bool generatefreq = false;
   bool generatedVdHzTable = false;
-  bool writecoarsefreqs = false;
+  bool writecoarsefreqs = true; // also read coarse freqs at the end.
   bool readcoarsefreqs = false;
   midimode = false;
-  bool donothing = true;
+  bool donothing = false;
 
   byte vco_pin = 4;
   byte max_pot = 3;
@@ -2740,16 +2840,18 @@ void setup()
   if (!midimode)
   {
     //Serial.begin(2400,SERIAL_8E2);
-    Serial.begin(9600);
+    Serial.begin(115200);
     Serial.print(charspeed);
     Serial.flush();   
     delay(3000);
     Serial.print("5");
     Serial.flush();
+    Serial.print(String(flash_status));
+    Serial.print(String(flash.getManID()));
   }
   StartAllPots(allpots);
-  Serial.print("5.1");
-  Serial.flush();
+  //Serial.print("5.1");
+  //Serial.flush();
   for (k=0;k<49;k++)
   {
     for(n=0;n<13;n++)
@@ -2758,8 +2860,8 @@ void setup()
     }    
   }
   
-  Serial.print("6");
-  Serial.flush();
+  //Serial.print("6");
+  //Serial.flush();
   freqrefpin = 9;
   subvco = 0;
   // select subvco 0 by default
@@ -2774,14 +2876,14 @@ void setup()
 
   MaxVcoPots(pots,midi_to_pot,2);
   MaxVcoPots(pots,midi_to_pot,3);
-  Serial.print("7");
+  //Serial.print("7");
   //DACTEST
   //pot1.decrease(99);
   //pot4.decrease(99);
 
   pot12.increase(99);
   delay(5000);
-  Serial.print("8");
+  //Serial.print("8");
   //pot12.decrease(30);
   
 
@@ -2801,13 +2903,13 @@ void setup()
     pot_vals[0][i] = 99;
   }
   pot_devs[0] = 0.0;
-  Serial.print("9");
+  //Serial.print("9");
   
   if (donothing) 
   {
     //Serial.begin(9600);
     //DebugPrintStr("SERIAL 9600",0);
-    Serial.print("10");
+    //Serial.print("10");
     return;
   }
 
@@ -2842,7 +2944,7 @@ void setup()
   {
 
     // TO DO : Convert ReadAllCoarseFreq to flash read
-    //ReadAllCoarseFrequencies();
+    ReadAllCoarseFrequencies();
     return;
     
   }
@@ -3431,7 +3533,21 @@ void loop() {
         digitalWrite(4,LOW);
       }
 
-      if (!subvco) 
+      else if (inp == '2') 
+      {
+        subvco = 2;
+        Serial.println("VCOSEL 2");
+        digitalWrite(4,HIGH);
+      }
+      else if(inp == '3') 
+      {
+        subvco = 3;
+        Serial.println("VCOSEL 3");
+        digitalWrite(4,LOW);
+      }
+
+
+      if (subvco == 0) 
       {
         if (inp == 's') 
         {
@@ -3483,21 +3599,26 @@ void loop() {
 
         if (inp == 't') 
         {
-          MCPDAC0.setValue(4095);
+          MCPdac.analogWrite(0,4095);
+          Serial.println("DAC0 high");
+      
         }
 
         if (inp == 'g') 
         {
-          MCPDAC0.setValue(2047);
+          MCPdac.analogWrite(0,2047);
+          Serial.println("DAC0 mid");
         }
 
         if (inp == 'b') 
         {
-          MCPDAC0.setValue(0);
+          MCPdac.analogWrite(0,0);
+          Serial.println("DAC0 low");
+      
         }
       } // end if (!subvco)
 
-      else 
+      else if (subvco == 1)
       {
 
         if (inp == 's') 
@@ -3550,17 +3671,164 @@ void loop() {
 
         if (inp == 't') 
         {
-          MCPDAC1.setValue(4095);
+          MCPdac.analogWrite(1,4095);
+          Serial.println("DAC1 high");
         }
 
           if (inp == 'g') 
         {
-          MCPDAC1.setValue(2047);
+          MCPdac.analogWrite(1,2047);
+          Serial.println("DAC1 mid");
+      
         }
 
           if (inp == 'b') 
         {
-          MCPDAC1.setValue(0);
+          MCPdac.analogWrite(1,0);
+          Serial.println("DAC1 low");
+      
+        } 
+      } // end ... else (subvco)
+    
+    else if (subvco == 2)
+      {
+
+        if (inp == 's') 
+        {
+          pot6.increase(1);
+          (midi_to_pot[6])++;
+          //intp3++;
+          PrintDigiPot(midi_to_pot,1,2);
+        }
+
+        if (inp == 'd') 
+        {
+          pot7.increase(1);
+          (midi_to_pot[7])++;
+          //intp4++;
+          PrintDigiPot(midi_to_pot,1,2);
+        }
+
+        if (inp == 'f') 
+        {
+          pot8.increase(1);
+          (midi_to_pot[8])++;
+          //intp5++;
+          PrintDigiPot(midi_to_pot,1,2);
+        }
+
+        if (inp == 'x') 
+        {
+          pot6.decrease(1);
+          (midi_to_pot[6])--;
+          //intp3--;
+          PrintDigiPot(midi_to_pot,1,2); 
+        }
+
+        if (inp == 'c') 
+        {
+          pot7.decrease(1);
+          (midi_to_pot[7])--;
+          //intp4--;
+          PrintDigiPot(midi_to_pot,1,2);
+        }
+
+        if (inp == 'v') 
+        {
+          pot8.decrease(1);
+          (midi_to_pot[8])--;
+          //intp5--;
+          PrintDigiPot(midi_to_pot,1,2); 
+        }
+
+        if (inp == 't') 
+        {
+          MCPdac.analogWrite(2,4095);
+          Serial.println("DAC2 high");
+      
+        }
+
+          if (inp == 'g') 
+        {
+          MCPdac.analogWrite(2,2047);
+          Serial.println("DAC2 mid");
+      
+        }
+
+          if (inp == 'b') 
+        {
+          MCPdac.analogWrite(2,0);
+          Serial.println("DAC2 low");
+      
+        } 
+      } // end ... else (subvco)
+
+    else if (subvco == 3)
+      {
+        if (inp == 's') 
+        {
+          pot9.increase(1);
+          (midi_to_pot[9])++;
+          //intp3++;
+          PrintDigiPot(midi_to_pot,1,2);
+        }
+
+        if (inp == 'd') 
+        {
+          pot10.increase(1);
+          (midi_to_pot[10])++;
+          //intp4++;
+          PrintDigiPot(midi_to_pot,1,2);
+        }
+
+        if (inp == 'f') 
+        {
+          pot11.increase(1);
+          (midi_to_pot[11])++;
+          //intp5++;
+          PrintDigiPot(midi_to_pot,1,2);
+        }
+
+        if (inp == 'x') 
+        {
+          pot9.decrease(1);
+          (midi_to_pot[9])--;
+          //intp3--;
+          PrintDigiPot(midi_to_pot,1,2); 
+        }
+
+        if (inp == 'c') 
+        {
+          pot10.decrease(1);
+          (midi_to_pot[10])--;
+          //intp4--;
+          PrintDigiPot(midi_to_pot,1,2);
+        }
+
+        if (inp == 'v') 
+        {
+          pot11.decrease(1);
+          (midi_to_pot[11])--;
+          //intp5--;
+          PrintDigiPot(midi_to_pot,1,2); 
+        }
+
+        if (inp == 't') 
+        {
+          MCPdac.analogWrite(3,4095);
+          Serial.println("DAC3 max");
+        }
+
+          if (inp == 'g') 
+        {
+          MCPdac.analogWrite(3,2047);
+          Serial.println("DAC3 mid");
+        }
+
+          if (inp == 'b') 
+        {
+          MCPdac.analogWrite(3,0);
+          Serial.println("DAC3 low");
         } 
       } // end ... else (subvco)
     } // end if (serial.available)
