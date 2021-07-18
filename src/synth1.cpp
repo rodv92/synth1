@@ -122,6 +122,9 @@ uint16_t ADSR_nb_samples[2];
 
 byte osc2noteshift;
 
+volatile uint32_t CaptureCountA, CaptureCountB, Period, Duty;
+volatile boolean CaptureFlag;
+
 enum ADSR_States {ADSR_Disable = 0, ADSR_Disabled, ADSR_Off, ADSR_AttackInit, ADSR_Attack, ADSR_DecayInit, ADSR_Decay, ADSR_Sustain, ADSR_ReleaseInit, ADSR_Release};
 
 
@@ -1604,41 +1607,97 @@ unsigned long pulseInLong2(uint8_t pin, uint8_t state, unsigned long timeout)
 }
 */
 
-void CountFrequency(byte samplesnumber, double &f_meas, byte subvco)
+void SetupFreqMeasure()
 {
-  uint8_t freq_meas_pin;
+  PMC->PMC_PCER0 |= PMC_PCER0_PID28;                       // Timer Counter 0 channel 1 IS TC1
+
+  TC0->TC_CHANNEL[1].TC_CMR = TC_CMR_TCCLKS_TIMER_CLOCK1   // capture mode, MCK/2, clk on rising edge
+                              | TC_CMR_ABETRG              // TIOA is used as the external trigger
+                              | TC_CMR_LDRA_RISING         // load RA on rising edge of trigger input
+                              | TC_CMR_LDRB_FALLING;       // load RB on falling edge of trigger input
+
+  TC0->TC_CHANNEL[1].TC_IER |= TC_IER_LDRAS | TC_IER_LDRBS; // Trigger interruption on Load RA and load RB
+  TC0->TC_CHANNEL[1].TC_CCR = TC_CCR_SWTRG | TC_CCR_CLKEN;  // Software trigger and enable
+
+  NVIC_DisableIRQ(TC1_IRQn);
+  NVIC_ClearPendingIRQ(TC1_IRQn);
+  NVIC_SetPriority(TC1_IRQn, 0);                      // Give TC1 interrupt the highest urgency
+  NVIC_SetPriority(SysTick_IRQn, 15);                 // SysTick interrupt will not interrupt TC1 interrupt
+  NVIC_SetPriority(UART_IRQn, 14);                    // UART interrupt will not interrupt TC1 interrupt
+
+  NVIC_EnableIRQ(TC1_IRQn);                     
+}
+
+void TC1_Handler() {
+
+  static uint32_t _CaptureCountA;
+
+  uint32_t status = TC0->TC_CHANNEL[1].TC_SR;       // Read and Clear status register
+
+
+  //if (status & TC_SR_LOVRS) abort();  // We are loosing some edges
+
+  if (status & TC_SR_LDRAS) {  // If ISR is triggered by LDRAS then ....
+    CaptureCountA = (uint32_t) TC0->TC_CHANNEL[1].TC_RA;        // get data from capture register A for TC0 channel 1
+    Period = CaptureCountA - _CaptureCountA;
+    _CaptureCountA = CaptureCountA;
+  }
+  else { /*if ((status & TC_SR_LDRBS) == TC_SR_LDRBS)*/  // If ISR is triggered by LDRBS then ....
+    CaptureCountB = (uint32_t) TC0->TC_CHANNEL[1].TC_RB;         // get data from caputre register B for TC0 channel 1
+    Duty = CaptureCountB - _CaptureCountA;
+    CaptureFlag = true;                      // set flag indicating a new capture value is present
+  }
+
+}
+
+void CountFrequency(uint8_t samplesnumber, double &f_meas, uint8_t subvco)
+{
+  uint8_t swvco_meas_pin = 24;
+  //uint8_t count = 0;
+  pinMode(swvco_meas_pin,OUTPUT);
+  pinMode(A7,INPUT);
+  SetupFreqMeasure();
+
   if ((subvco == 0) || (subvco == 1))
   {
-    freq_meas_pin = 34;
+    digitalWrite(swvco_meas_pin,HIGH);
   }
   else if ((subvco == 1) || (subvco == 2))
   {
-    freq_meas_pin = 35;
+    digitalWrite(swvco_meas_pin,LOW);
   }
-  pinMode(freq_meas_pin, INPUT);
+  //pinMode(freq_meas_pin, INPUT);
   //digitalWrite(34, HIGH);
   //FreqCount.begin(gatetime);
 
   double f_total_measured = 0.0;
+  double f_temp = 0.0;
   double f_err_calc = 0.0;
   
   //float integrator_temp = 0.0;
-  unsigned long sumlow = 0;   
-  unsigned long sumhigh = 0;   
+  //unsigned long sumlow = 0;   
+  //unsigned long sumhigh = 0;   
   
 
-  byte counthigh = 0;
-  byte countlow = 0;
-  byte count = 0;
+  //byte counthigh = 0;
+  //byte countlow = 0;
+  //byte count = 0;
+  uint8_t totalpulses = 0;
+  uint32_t sumpulses = 0;
+  uint16_t millistimeout = 1500;
+  uint16_t millispassed = 0;
+  uint16_t millisstart = 0;
   
-  unsigned long pulsehigh = 0;
-  unsigned long pulselow = 0;
+  //unsigned long pulsehigh = 0;
+  //unsigned long pulselow = 0;
 
   //timer2.setup();
-  
-  while (count < samplesnumber)
+  millisstart = millis();
+  while (totalpulses < samplesnumber) 
   {
-   
+    delay(5);
+    if (millispassed > millistimeout) {break;}
+   /*
     pulsehigh = pulseIn(freq_meas_pin,HIGH,100000);
     pulselow = pulseIn(freq_meas_pin,LOW,100000);
 
@@ -1653,21 +1712,39 @@ void CountFrequency(byte samplesnumber, double &f_meas, byte subvco)
       sumlow += pulselow;
       countlow++;
     }
-    count++;
+    */
+
+    if ( CaptureFlag == true) 
+    {
+      //Frequency = _F_CPU / Period  ; //  (Mck/2 is TC1 clock) F in Hz
+      //_Duty = (Duty * 100.00) / Period;
+      CaptureFlag = false;
+      if (totalpulses > 1) 
+      {
+        sumpulses += Period;
+        //Serial.println(Period);
+        //Serial.println(sumpulses);
+        //Serial.println(totalpulses); 
+      }
+      totalpulses++;
+    }
+    millispassed = millis() - millisstart;
   }
  
   //timer2.unsetup();
   
-  if ((countlow >0) && (counthigh>0))
+  if (sumpulses >0)
   {
-    f_total_measured = 2000000.0/((sumhigh/counthigh) + (sumlow/countlow));
+    f_temp = double(sumpulses)/double(totalpulses -2);
+    f_total_measured = double((F_CPU/f_temp)/2);
     //DebugPrint("ftm",f_total_measured,0);
     //f_err_calc = tunefrequency*1.55005013e-03 -1.45261187e-01;
-    f_err_calc = f_total_measured*1.36503806e-03 -7.58951531e-02;
-    f_meas = f_total_measured + f_err_calc;  
+    //f_err_calc = f_total_measured*1.36503806e-03 -7.58951531e-02;
+    f_meas = f_total_measured; //+ f_err_calc;  
   }
 
     DebugPrint("f_total_meas",f_meas,5);
+    DebugPrint("totalpulses",double(totalpulses),4);
   
 }
 
@@ -2500,6 +2577,7 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)
       DebugPrint("ADDR:",double(addr),2);
       DebugPrint("FREQ:",double(f_meas),4);
       flash.writeFloat(addr,f_meas);
+      delay(500);
       //EEPROM.put(addr,f_meas);
       //we write frequencies in increasing order
       //delay(1000);
@@ -2739,6 +2817,8 @@ return integrator;
 void setup() 
 {
 
+  pinMode(24,OUTPUT);
+  digitalWrite(24,LOW);
   bool flash_status;
   SPI.begin();
   //DebugPrintStr(String(flash.begin(32*1024)),4);
@@ -3537,13 +3617,13 @@ void loop() {
       {
         subvco = 2;
         Serial.println("VCOSEL 2");
-        digitalWrite(4,HIGH);
+        digitalWrite(5,HIGH);
       }
       else if(inp == '3') 
       {
         subvco = 3;
         Serial.println("VCOSEL 3");
-        digitalWrite(4,LOW);
+        digitalWrite(5,LOW);
       }
 
 
