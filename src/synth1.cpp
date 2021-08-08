@@ -44,7 +44,7 @@ double DAC_cor[4];
 
 MIDI_CREATE_INSTANCE(HardwareSerial,Serial,MIDI);
 
-byte DebugLevel = 5;
+byte DebugLevel = 0;
 
 // Digi Pot constructors : (object constructor patched for MCP23017 support)
 /*
@@ -243,7 +243,8 @@ uint8_t gatepin = 7;
 uint8_t hspin = 8;
 
 double notefreq;
-double minfreq = 130.8;
+//double minfreq = 130.8;
+double minfreq = 90.0;
 double maxfreq = 2093.0;
 
 const byte numChars = 40;
@@ -487,18 +488,33 @@ return dV;
 
 }
 
-uint16_t d_freq_to_DAC_steps(double delta_freq, uint8_t subvco, bool globaltune) {
+uint16_t d_freq_to_DAC_steps(double delta_freq, double prev_delta_freq, uint8_t subvco) {
 
 int16_t DAC_steps;
 double DAC_steps_temp;
+double DAC_gain_corrected;
 //DAC_steps_temp = delta_freq * -(DAC_gain[subvco])*(globaltune +1);
-DAC_steps_temp = delta_freq * -(DAC_gain[subvco]);
+/* 
+if (delta_freq != prev_delta_freq)
+{
+  DAC_gain_corrected = (delta_freq + (prev_delta_freq * DAC_gain[subvco]))/prev_delta_freq;
+  DebugPrint("dac_gain_corrected_subvco", double(subvco),4);
+  DebugPrint("dac_gain_corrected_val", DAC_gain_corrected,4);
+  DAC_steps_temp = delta_freq * -DAC_gain_corrected;
+  DAC_gain[subvco] = DAC_gain_corrected;
+
+}
+else
+{ 
+*/ 
+  DAC_steps_temp = delta_freq * -(DAC_gain[subvco]);
+//}
 
 if (DAC_steps_temp > 0) { DAC_steps_temp += 0.5;}
 else { DAC_steps_temp -= 0.5;}
 
 DAC_steps = constrain(int(DAC_steps_temp),-4096,4096);
-DebugPrint("double_factor",double(globaltune +1),2);
+//DebugPrint("double_factor",double(globaltune +1),2);
 
 DebugPrint("delta_DAC_steps",double(DAC_steps),2);
 DebugPrintToken("\n",2);
@@ -1253,9 +1269,13 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[12], double freq, double dut
 
   saw_freq_duty_to_R_DAC(freq, 1.5, duty, Rvco1 , Rvco2, f1, f2, vco);
 
-  DebugPrint("duty",duty,2);
-  DebugPrint("R1",Rvco1,2);
-  DebugPrint("R2",Rvco2,2);
+  DebugPrint("duty\n",duty,2);
+  DebugPrint("R1\n",Rvco1,2);
+  DebugPrint("R2\n",Rvco2,2);
+  DebugPrint("f1\n",f1,2);
+  DebugPrint("f2\n",f2,2);
+
+
 
   //Check for R value special cases
   
@@ -1742,7 +1762,7 @@ void TC1_Handler() {
 
 }
 
-void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, double f2, double &f_meas, double &f1_meas, double &f2_meas, double &f_err, uint8_t vco) 
+void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double fhigh, double flow, double &f_meas, double &fhigh_meas, double &flow_meas, double &f_err, uint8_t vco) 
 {
 
   uint8_t swvco_meas_pin = 24;
@@ -1827,16 +1847,16 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double f1, dou
     t_temp_low = t_temp_total - t_temp_high;
     f_total_measured = double((F_CPU/t_temp_total)/2);
     f_meas = f_total_measured; //+ f_err_calc; 
-    f1_meas =  double((F_CPU/t_temp_high)/4);
-    f2_meas =  double((F_CPU/t_temp_low)/4);
+    fhigh_meas =  double((F_CPU/t_temp_high)/4);
+    flow_meas =  double((F_CPU/t_temp_low)/4);
     
   }
 
     DebugPrint("f_total_meas",f_meas,5);
     //SerialUSB.println("");
-    DebugPrint("f1_meas",f1_meas,5);
+    DebugPrint("fhigh_meas",fhigh_meas,5);
     //SerialUSB.println("");
-    DebugPrint("f2_meas",f2_meas,5);
+    DebugPrint("flow_meas",flow_meas,5);
     //SerialUSB.println("");
 
     //DebugPrint("totalpulses",double(totalpulses),5);
@@ -2189,6 +2209,131 @@ void Generate_dV_to_dHz_Table(byte (&curr_pot_vals)[12],double center_freq, uint
 
 
 }
+void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex, double tunefrequency, double duty ,double fhigh, double flow, byte vco, bool order) 
+{ 
+
+  //Two components parallel tuning with weighted subosc error compensation
+  // Tune both osc at the same time based on fhigh_meas_err and flow_meas_err
+  // tune both osc at the same time based on f_total_err, using duty cycle as weighting for the period error.
+
+  byte max_pot = 6;
+  double f_meas = 0.0;
+  double fhigh_meas = 0.0;
+  double flow_meas = 0.0;
+  double fhigh_err = 0.0;
+  double flow_err = 0.0;
+  double f_err = 0.0;
+  
+  int max_integrations = 10;
+  float states_integrator[2][max_integrations];
+ 
+  double dutycor;
+  double dev_cents[2] = {0.0,0.0};
+  const double tune_thresh = 2.5;
+  uint16_t DAC_steps[2] = {0,0};
+  
+ 
+  int p;
+  uint8_t m;
+
+  bool tuned[2] = {false,false};
+  double dintegrator = 0.0;
+  double dintegrator_p = 0.0;
+  
+  
+  float integrator = 0.0;
+  //float integrator_1 = 0.0;
+  //float min_integrator = 0.0;
+
+  //int integrator_count = 0;
+
+  //int best_index = 0;
+  byte curr_pot_val_bck = 0;
+
+
+  if (duty >= 0.5) { dutycor = duty;}
+  else if (duty <= 0.5) { dutycor = 1 - duty;}
+  //min_integrator = fabs(states_integrator[0]);
+        
+  for (p=0;p<max_integrations;p++) 
+  {
+
+   
+      // measure both frequencies errors
+      // f_err is : f_measured - f_target;
+
+
+      CountFrequencyDelta2(10,tunefrequency,fhigh,flow,f_meas,fhigh_meas,flow_meas,f_err,vco);
+      fhigh_err = fhigh_meas - fhigh;
+      flow_err = flow_meas - flow;
+       
+      DebugPrint("fhigh_err",fhigh_err,2);
+      DebugPrintToken("\n",2);
+      DebugPrint("flow_err",flow_err,2);
+      DebugPrintToken("\n",2);
+      DebugPrint("fhigh",fhigh,2);
+      DebugPrintToken("\n",2);
+      DebugPrint("flow",flow,2);
+      DebugPrintToken("\n",2);
+
+      
+      DebugPrint("vco",double(vco),5);
+      DebugPrintToken("\n",5);
+      
+      //integrator = (float) dintegrator;
+      dev_cents[0] = 1200 * log(fhigh_meas/fhigh)/log(2);
+      dev_cents[1] = 1200 * log((flow_meas)/flow)/log(2);
+      
+      states_integrator[0][p] = fhigh_err;
+      states_integrator[1][p] = flow_err;
+      
+      
+      if (p > 0)
+      {
+        if (!tuned[0]) {DAC_steps[0] = d_freq_to_DAC_steps(states_integrator[0][p],states_integrator[0][p-1],2*vco + !order);}
+        if (!tuned[1]) {DAC_steps[1] = d_freq_to_DAC_steps(states_integrator[1][p],states_integrator[1][p-1],2*vco + order);}
+      }
+      else
+      {
+        if (!tuned[0]) {DAC_steps[0] = d_freq_to_DAC_steps(states_integrator[0][p],states_integrator[0][p],2*vco + !order);}
+        if (!tuned[1]) {DAC_steps[1] = d_freq_to_DAC_steps(states_integrator[1][p],states_integrator[1][p],2*vco + order);}
+      }
+      
+      if (!tuned[0]) {Adjust_DAC(DAC_steps[0],2*vco + !order);}
+      if (!tuned[1]) {Adjust_DAC(DAC_steps[1],2*vco + order);}
+      
+      //vco formula global tune
+   
+    if (fabs(dev_cents[0]) <= tune_thresh) 
+    { 
+      tuned[0] = true;
+      DebugPrint("THR_ATT",double(fabs(dev_cents[0])),2);
+      DebugPrintToken("\n",2);
+    } //end tune thresh att
+
+    if (fabs(dev_cents[1]) <= tune_thresh) 
+    { 
+      tuned[1] = true;
+      DebugPrint("THR_ATT",double(fabs(dev_cents[1])),2);
+      DebugPrintToken("\n",2);
+    } //end tune thresh att
+
+    if (tuned[0] && tuned[1]) { break;}
+
+  } // end for p < max_integrations
+
+  // now proportional error tuning.
+
+  for(m = vco*max_pot; m < vco*max_pot + max_pot; m ++)
+  {
+    PWM_Note_Settings[noteindex][m] = curr_pot_vals[m];
+  }
+
+  PWM_DAC_Settings[noteindex][2*vco] = DAC_states[2*vco];
+  PWM_DAC_Settings[noteindex][2*vco +1] = DAC_states[2*vco +1];
+  
+
+} // end NewAutotuneDAC2
 
 void NewAutoTuneDAC(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex, double tunefrequency, double duty ,double freq, bool level, byte subvco, bool globaltune) 
 { 
@@ -2209,8 +2354,8 @@ void NewAutoTuneDAC(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex,
   }
 */
   //int num_integrations = 0;
-  int max_integrations = 90;
-  int states[max_integrations][3];
+  int max_integrations = 10;
+  //int states[max_integrations][3];
   float states_integrator[max_integrations];
  
   
@@ -2247,7 +2392,7 @@ void NewAutoTuneDAC(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex,
   else if (duty <= 0.5) { dutycor = 1 - duty;}
   //min_integrator = fabs(states_integrator[0]);
         
-  for (p=0;p<=max_integrations;p++) 
+  for (p=0;p<max_integrations;p++) 
   {
 
     if (globaltune)
@@ -2266,7 +2411,17 @@ void NewAutoTuneDAC(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex,
       integrator = (float) dintegrator;
       dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
       //DAC_steps = d_freq_to_DAC_steps(dintegrator_p,subvco);
-      DAC_steps = d_freq_to_DAC_steps(dintegrator/dutycor,subvco,globaltune);
+      states_integrator[p] = dintegrator/dutycor;
+      
+      if (p > 0)
+      {
+        //DAC_steps = d_freq_to_DAC_steps(states_integrator[p],states_integrator[p-1],subvco,globaltune);
+      }
+      else
+      {
+        //DAC_steps = d_freq_to_DAC_steps(states_integrator[p],states_integrator[p],subvco,globaltune);
+      }
+      
       Adjust_DAC(DAC_steps,subvco);
       //vco formula global tune
 
@@ -2284,8 +2439,18 @@ void NewAutoTuneDAC(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex,
       DebugPrintToken("\n",5);
              
       integrator = (float) dintegrator_p;
+      states_integrator[p] = integrator;
       dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
-      DAC_steps = d_freq_to_DAC_steps(integrator,subvco,globaltune);
+      
+      if (p > 0)
+      {
+        //DAC_steps = d_freq_to_DAC_steps(states_integrator[p],states_integrator[p-1],subvco,globaltune);
+      }
+      else
+      {
+        //DAC_steps = d_freq_to_DAC_steps(states_integrator[p],states_integrator[p],subvco,globaltune);
+      }
+      
       Adjust_DAC(DAC_steps,subvco);
       //vco formula single tune
 
@@ -2296,17 +2461,17 @@ void NewAutoTuneDAC(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex,
       tuned = true;
       DebugPrint("THR_ATT",double(fabs(dev_cents)),2);
       DebugPrintToken("\n",2);
-      states[p][0] = curr_pot_vals[subvco*max_pot];
-      states[p][1] = curr_pot_vals[subvco*max_pot+1];
-      states[p][2] = curr_pot_vals[subvco*max_pot+2];
-      states_integrator[p] = integrator;
+      //states[p][0] = curr_pot_vals[subvco*max_pot];
+      //states[p][1] = curr_pot_vals[subvco*max_pot+1];
+      //states[p][2] = curr_pot_vals[subvco*max_pot+2];
+      //states_integrator[p] = integrator;
       break;
     } //end tune thresh att
 
-      states[p][0] = curr_pot_vals[subvco*max_pot];
-      states[p][1] = curr_pot_vals[subvco*max_pot+1];
-      states[p][2] = curr_pot_vals[subvco*max_pot+2];
-      states_integrator[p] = integrator;
+      //states[p][0] = curr_pot_vals[subvco*max_pot];
+      //states[p][1] = curr_pot_vals[subvco*max_pot+1];
+      //states[p][2] = curr_pot_vals[subvco*max_pot+2];
+      //states_integrator[p] = integrator;
         
   } // end for p < max_integrations
 
@@ -2393,7 +2558,7 @@ void handleControlChange(byte channel, byte ccnum, byte val)
 
     // semitone pot shift for OSC2 -12 to +12 LSB 0 to 127.
     if (val > 23) { osc2noteshift = 12;}
-    else { osc2noteshift = (val + 1) - 12;}
+    else { osc2noteshift =  val  - 12;}
 
   }
 
@@ -2442,7 +2607,7 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   double f1_meas = 0.0;
   double f2_meas = 0.0;
   double f_err = 0.0;
-  double duty = 0.25;
+  double duty = 0.33;
   double notefreq[2];
   double osc2notefreq;
   uint8_t i;
@@ -2473,8 +2638,10 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     DebugPrintToken("IN_TUNING",1);
    //MIDI.sendNoteOn(42, 127, 1);
     return;}
-  else if (PWM_Note_Settings[noteindexes[0]][12] == 0) 
+  else if ((PWM_Note_Settings[noteindexes[0]][12] == 0) || (PWM_Note_Settings[noteindexes[1]][13] == 0))
   { DebugPrintToken("NOT_YET_TUNED",1);
+    DebugPrint("TUNE STATUS VCO0", double(PWM_Note_Settings[noteindexes[0]][12]),4);
+    DebugPrint("TUNE STATUS VCO1", double(PWM_Note_Settings[noteindexes[1]][13]),4);
     InTuning = true;
   //MIDI.sendNoteOn(43, 127, 1);
   }
@@ -2554,7 +2721,12 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   for (i=0;i<2;i++)
   {
     // Set pots for coarse tuning and set both DACs to half deflection setpoint (2047) 
-    
+    if (PWM_Note_Settings[noteindexes[i]][12 + i] == 1) 
+      { 
+        DebugPrint("ALREADY TUNED VCO:",double(i),5);
+        continue;
+      }
+
     DebugPrint("TUNE VCO:",double(i),5);
     DebugPrint("BEFORE ARB FREQ:",double(i),5);
     //CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
@@ -2614,38 +2786,40 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
 
         DebugPrintStr("TUNE CASE 3:",2);
     
-        NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f2,1,2*i,0);
-        //MIDI.sendNoteOn(54, 127, 1);
-  
+        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f2,1,2*i,0);
+        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,f2,i,0);
+
         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,0,2*i + 1,1);
-        //MIDI.sendNoteOn(55, 127, 1);
-  
+        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,0,2*i + 1,1);
+        
         CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
-        //MIDI.sendNoteOn(56, 127, 1);
-  
+        
     }
     else if (f1 > f2)
     {
 
         // when duty < 0.5
         DebugPrintStr("TUNE CASE 4:",2);
-    
-        NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,1,2*i,0);
-        //MIDI.sendNoteOn(57, 127, 1);
-  
+        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,1,2*i,0);
+        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,f2,i,1);
+
         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f2,0,2*i + 1,1);
-        //MIDI.sendNoteOn(58, 127, 1);
-  
+        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f2,0,2*i + 1,1);
+        
         CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
-        //MIDI.sendNoteOn(59, 127, 1);
-  
-        //CountFrequencyDeltaGlobal(50,notefreq,f_err);
+        
     }
+
+  PWM_Note_Settings[noteindexes[i]][12 + i] = 1;
+  //DebugPrint("TUNE WRITE STATUS VCO", double(PWM_Note_Settings[noteindexes[i]][12 +i]),4);
+  
   } // end tune OSC sequentially
 
-  PWM_Note_Settings[noteindexes[0]][12] = 1;
+  //PWM_Note_Settings[noteindexes[0]][12] = 1;
+  //DebugPrint("TUNE STATUS VCO0", double(PWM_Note_Settings[noteindexes[0]][12]),4);
+  //DebugPrint("TUNE STATUS VCO1", double(PWM_Note_Settings[noteindexes[1]][13]),4);
+
+
   InTuning = false;
   digitalWrite(gatepin, HIGH);
  
@@ -3123,7 +3297,7 @@ void setup()
   
   for (k=0;k<49;k++)
   {
-    for(n=0;n<13;n++)
+    for(n=0;n<14;n++)
     {
       PWM_Note_Settings[k][n] = 0;
     }    
