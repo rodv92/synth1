@@ -122,18 +122,22 @@ uint16_t DAC_table[4][360]; // full period DAC_table for both suboscs
 float sample_inc; // time interval in seconds of 1 sample of LFO. (LFO Freq dependent)
 float inv_sample_inc_micros; // inverse time interval in µsec of 1 sample of LFO (LFO Freq dependent)
 
-float sample_adsr_inc[6];// time interval in seconds for attack,decay,release. first 3 values = ADSR0,
-// next 3, ADSR1
-float inv_sample_adsr_inc_micros[6]; // same as above, inverse time interval
+float sample_adsr_inc[8];// time interval in seconds for attack,decay,release, sustain(if looped). first 4 values = A D R S (DAC0),
+// next 4, A D R S (DAC1)
+float inv_sample_adsr_inc_micros[8]; // same as above, inverse time interval
  
 uint8_t ADSR_DAC_State[2];
 uint8_t ADSR_Sustain_Level[2];
 
 uint16_t ADSR_nb_samples[2];
+bool ADSR_looped = true;
+
+bool Gate_DAC = true;
+float inv_gate_period_micros = 0.0;
 
 // semitone shift of OSC2
 int16_t osc2noteshift;
-
+int8_t cents_detune[2] = {0,0};
 
 // VCA attack/decay
 int16_t attack;
@@ -219,6 +223,7 @@ const double notes_freq[49] = {
 
 uint8_t PWM_Note_Settings[49][14];
 uint16_t PWM_DAC_Settings[49][4];
+double PWM_Real_Duty[49][2];
 
 byte k;
 byte n;
@@ -232,6 +237,7 @@ char pothigh_inc[2] =  "s";
 
 
 bool InTuning = false;
+bool InitialTune = true;
 bool PWMActive = false;
 bool midimode;
 
@@ -366,7 +372,7 @@ void PrintDigiPot(byte (&curr_pot_vals)[12], byte subvco, byte msgdebuglevel)
     }
 
 
-    Serial.flush();
+    SerialUSB.flush();
   }
 }
 
@@ -380,7 +386,7 @@ void DebugPrint(String token, double value, byte msgdebuglevel)
   SerialUSB.print("=");
   SerialUSB.print(String(value,5));
   SerialUSB.print(">");
-  Serial.flush();
+  SerialUSB.flush();
   }
 
 }
@@ -392,7 +398,7 @@ void DebugPrintToken(String token, byte msgdebuglevel)
   SerialUSB.print("<");
   SerialUSB.print(token);
   SerialUSB.print(">");
-  Serial.flush();
+  SerialUSB.flush();
   }
 }
 
@@ -402,7 +408,7 @@ void DebugPrintStr(String token, byte msgdebuglevel)
   if (msgdebuglevel <= DebugLevel)
   {
   SerialUSB.print(token);
-  Serial.flush();
+  SerialUSB.flush();
   }
 }
 
@@ -488,16 +494,15 @@ return dV;
 
 }
 
-uint16_t d_freq_to_DAC_steps(double delta_freq, double prev_delta_freq, uint8_t subvco) {
+uint16_t d_freq_to_DAC_steps(double delta_freq, double prev_delta_freq, uint8_t subvco, bool adaptive) {
 
 int16_t DAC_steps;
 double DAC_steps_temp;
 double DAC_gain_corrected;
-//DAC_steps_temp = delta_freq * -(DAC_gain[subvco])*(globaltune +1);
-/* 
-if (delta_freq != prev_delta_freq)
+
+if ((delta_freq != prev_delta_freq) && (adaptive))
 {
-  DAC_gain_corrected = (delta_freq + (prev_delta_freq * DAC_gain[subvco]))/prev_delta_freq;
+  DAC_gain_corrected = (prev_delta_freq * DAC_gain[subvco])/(prev_delta_freq - delta_freq);
   DebugPrint("dac_gain_corrected_subvco", double(subvco),4);
   DebugPrint("dac_gain_corrected_val", DAC_gain_corrected,4);
   DAC_steps_temp = delta_freq * -DAC_gain_corrected;
@@ -505,10 +510,9 @@ if (delta_freq != prev_delta_freq)
 
 }
 else
-{ 
-*/ 
+{  
   DAC_steps_temp = delta_freq * -(DAC_gain[subvco]);
-//}
+}
 
 if (DAC_steps_temp > 0) { DAC_steps_temp += 0.5;}
 else { DAC_steps_temp -= 0.5;}
@@ -582,27 +586,33 @@ void Adjust_DAC(int16_t dac_steps, uint8_t subvco)
        
 }
 
-void InitADSR(uint8_t adsr_sel, uint16_t nb_samples, uint16_t attack_millis, uint16_t decay_millis, uint16_t release_millis, uint8_t sustain_level)
+void InitADSR(uint8_t adsr_sel, uint16_t nb_samples, uint16_t attack_millis, uint16_t decay_millis, uint16_t sustain_millis ,uint16_t release_millis, uint8_t sustain_level)
 {
   if (adsr_sel == 0)
   {
     sample_adsr_inc[0] = 1.0/(nb_samples*float(attack_millis/1E3));
     sample_adsr_inc[1] = 1.0/(nb_samples*float(decay_millis/1E3));
     sample_adsr_inc[2] = 1.0/(nb_samples*float(release_millis/1E3));
-    inv_sample_adsr_inc_micros[0] = (nb_samples*float(attack_millis/1E3))/1E6;
-    inv_sample_adsr_inc_micros[1] = (nb_samples*float(decay_millis/1E3))/1E6;
-    inv_sample_adsr_inc_micros[2] = (nb_samples*float(release_millis/1E3))/1E6;
+    sample_adsr_inc[3] = 1.0/(nb_samples*float(sustain_millis/1E3));
+    
+    inv_sample_adsr_inc_micros[0] = (nb_samples*float(attack_millis/1E3))/1E3;
+    inv_sample_adsr_inc_micros[1] = (nb_samples*float(decay_millis/1E3))/1E3;
+    inv_sample_adsr_inc_micros[2] = (nb_samples*float(release_millis/1E3))/1E3;
+    inv_sample_adsr_inc_micros[3] = (nb_samples*float(sustain_millis/1E3))/1E3;
     ADSR_nb_samples[0] = nb_samples;
     ADSR_Sustain_Level[0] = sustain_level;
   }
   else if (adsr_sel == 1)
   {
-    sample_adsr_inc[3] = 1.0/(nb_samples*float(attack_millis/1E3));
-    sample_adsr_inc[4] = 1.0/(nb_samples*float(decay_millis/1E3));
-    sample_adsr_inc[5] = 1.0/(nb_samples*float(release_millis/1E3));
-    inv_sample_adsr_inc_micros[3] = (nb_samples*float(attack_millis/1E3))/1E6;
-    inv_sample_adsr_inc_micros[4] = (nb_samples*float(decay_millis/1E3))/1E6;
-    inv_sample_adsr_inc_micros[5] = (nb_samples*float(release_millis/1E3))/1E6;
+    sample_adsr_inc[4] = 1.0/(nb_samples*float(attack_millis/1E3));
+    sample_adsr_inc[5] = 1.0/(nb_samples*float(decay_millis/1E3));
+    sample_adsr_inc[6] = 1.0/(nb_samples*float(release_millis/1E3));
+    sample_adsr_inc[7] = 1.0/(nb_samples*float(sustain_millis/1E3));
+    inv_sample_adsr_inc_micros[4] = (nb_samples*float(attack_millis/1E3))/1E3;
+    inv_sample_adsr_inc_micros[5] = (nb_samples*float(decay_millis/1E3))/1E3;
+    inv_sample_adsr_inc_micros[6] = (nb_samples*float(release_millis/1E3))/1E3;
+    inv_sample_adsr_inc_micros[7] = (nb_samples*float(release_millis/1E3))/1E3;
+
     ADSR_nb_samples[1] = nb_samples;
     ADSR_Sustain_Level[1] = sustain_level;
   }
@@ -668,7 +678,7 @@ void InitSinTable(float LFOFreq, int16_t SinTable[], uint16_t nb_samples)
 
 }
 
-void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, float notefreq, uint8_t vco) 
+void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, float notefreq, uint8_t vco, bool order) 
 {
   //enables PWM for the oscillator by managing frequency of both subosc through DAC
   //We have to check that DutyDepth is not out of bounds of DAC range according to the noteoffset.
@@ -698,10 +708,10 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
   //DebugPrint("vco_freq[1]",vco_freq[1],4);
   
   // get max voltage deflection from current offset, and get max possible DutyDepth;
-  dVmax[0] = 3.0*(2047.0 - fabs(DAC_states[vco*2]- 2047.0))/4095.0;
-  dVmax[1] = 3.0*(2047.0 - fabs(DAC_states[vco*2 +1] - 2047.0))/4095.0;
-  DebugPrint("DAC_states[0]",DAC_states[vco*2],0);
-  DebugPrint("DAC_states[1]",DAC_states[vco*2 + 1],0);
+  dVmax[0] = 3.0*(2047.0 - fabs(DAC_states[vco*2 + !order]- 2047.0))/4095.0;
+  dVmax[1] = 3.0*(2047.0 - fabs(DAC_states[vco*2 + order] - 2047.0))/4095.0;
+  DebugPrint("DAC_states[0]",DAC_states[vco*2 + !order],1);
+  DebugPrint("DAC_states[1]",DAC_states[vco*2 + order],1);
  
   DebugPrint("dVmax[0]",dVmax[0],3);
   DebugPrint("dVmax[1]",dVmax[1],3);
@@ -749,71 +759,71 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
     {
     case 0:
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
-      DACdtmp = DAC_gain[vco*2]*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal)) + DAC_cor[vco*2];
+      DACdtmp = -DAC_gain[vco*2 +!order]*DutyCenterVal*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal))- DAC_cor[vco*2 + !order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2]),0,4095);
-      DAC_table[0][sample] = constrain(DACd + DAC_states[vco*2],0,4095);
+      DAC_table[vco*2 + !order][sample] = constrain(DACd + DAC_states[vco*2 + !order],0,4095);
       
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
-      DACdtmp = DAC_gain[vco*2 + 1]*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) + DAC_cor[vco*2 + 1];
+      DACdtmp = -DAC_gain[vco*2 + order]*DutyCenterValCmp*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) - DAC_cor[vco*2 + order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2 +1]),0,4095);
-      DAC_table[1][sample] = constrain(DACd + DAC_states[vco*2 +1],0,4095);
+      DAC_table[vco*2 +order][sample] = constrain(DACd + DAC_states[vco*2 +order],0,4095);
       
       break;
     
     case 1:
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
-      DACdtmp = DAC_gain[vco*2]*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal)) + DAC_cor[vco*2];
+      DACdtmp = -DAC_gain[vco*2 + !order]*DutyCenterVal*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 + !order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2]),0,4095);
-      DAC_table[0][sample] = constrain(DACd + DAC_states[vco*2],0,4095);
+      DAC_table[vco*2 + !order][sample] = constrain(DACd + DAC_states[vco*2 + !order],0,4095);
      
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
-      DACdtmp = DAC_gain[vco*2 + 1]*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) + DAC_cor[vco*2 + 1];
+      DACdtmp = -DAC_gain[vco*2 + order]*DutyCenterValCmp*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2 +1]),0,4095);
-      DAC_table[1][sample] = constrain(DACd + DAC_states[vco*2 +1],0,4095);
+      DAC_table[vco*2 + order][sample] = constrain(DACd + DAC_states[vco*2 + order],0,4095);
      
       break;
 
     case 2:
 
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
-      DACdtmp = DAC_gain[vco*2]*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal)) + DAC_cor[vco*2];
+      DACdtmp = -DAC_gain[vco*2 + !order]*DutyCenterVal*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 + !order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2]),0,4095);
-      DAC_table[0][sample] = constrain(DACd + DAC_states[vco*2],0,4095);
+      DAC_table[vco*2 + !order][sample] = constrain(DACd + DAC_states[vco*2 +!order],0,4095);
     
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
-      DACdtmp = DAC_gain[vco*2 + 1]*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) + DAC_cor[vco*2 + 1];
+      DACdtmp = -DAC_gain[vco*2 + order]*DutyCenterValCmp*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2 +1]),0,4095);
-      DAC_table[1][sample] = constrain(DACd + DAC_states[vco*2 +1],0,4095);
+      DAC_table[vco*2 + order][sample] = constrain(DACd + DAC_states[vco*2 + order],0,4095);
      
       break;
 
     case 3:
 
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
-      DACdtmp = DAC_gain[vco*2]*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal)) + DAC_cor[vco*2];
+      DACdtmp = -DAC_gain[vco*2 + !order]*DutyCenterVal*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 +!order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2]),0,4095);
-      DAC_table[0][sample] = constrain(DACd + DAC_states[vco*2],0,4095);
+      DAC_table[vco *2 + !order][sample] = constrain(DACd + DAC_states[vco*2 +!order],0,4095);
       
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
-      DACdtmp = DAC_gain[vco*2 + 1]*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) + DAC_cor[vco*2 + 1];
+      DACdtmp = -DAC_gain[vco*2 + order]*DutyCenterValCmp*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2 +1]),0,4095);
-      DAC_table[1][sample] = constrain(DACd + DAC_states[vco*2 +1],0,4095);
+      DAC_table[vco*2 + order][sample] = constrain(DACd + DAC_states[vco*2 + order],0,4095);
    
       break;
     }
@@ -997,7 +1007,7 @@ void R_to_pot_DAC(double R, byte &val_pot100K, uint8_t subvco)
 
     if(R > (R1O0Kb_total_R_subvco0 + R1OOK_total_R_subvco0 + R1K_total_R_subvco0 + trim_pot_R_subvco0))
       {val_pot100K = 199;
-      DebugPrintToken("ABOVE POSSIBLE R vco0",2);
+      DebugPrintToken("ABOVE POSSIBLE R vco0",5);
       return;
       } // R value is above max R obtainable with this setup, max out pots.
 
@@ -1024,7 +1034,7 @@ void R_to_pot_DAC(double R, byte &val_pot100K, uint8_t subvco)
 
     if(R > (R1OOK_total_R_subvco1 + R1O0Kb_total_R_subvco1 + R1K_total_R_subvco1 + trim_pot_R_subvco1))
       {val_pot100K = 199;
-      DebugPrintToken("ABOVE POSSIBLE R vco1",2);
+      DebugPrintToken("ABOVE POSSIBLE R vco1",5);
       return;} // R value is above max R obtainable with this setup, max out pots.
 
     if(R > R1O0Kb_total_R_subvco1) // in this case we use all the steps of pot4
@@ -1047,7 +1057,7 @@ void R_to_pot_DAC(double R, byte &val_pot100K, uint8_t subvco)
 
     if(R > (R1OOK_total_R_subvco2 + R1O0Kb_total_R_subvco2 + R1K_total_R_subvco2 + trim_pot_R_subvco2))
       {val_pot100K = 199;
-      DebugPrintToken("ABOVE POSSIBLE R vco1",2);
+      DebugPrintToken("ABOVE POSSIBLE R vco1",5);
       return;} // R value is above max R obtainable with this setup, max out pots.
 
     if(R > R1O0Kb_total_R_subvco2) // in this case we use all the steps of pot4
@@ -1071,7 +1081,7 @@ void R_to_pot_DAC(double R, byte &val_pot100K, uint8_t subvco)
 
     if(R > (R1OOK_total_R_subvco3 + R1O0Kb_total_R_subvco3 + R1K_total_R_subvco3 + trim_pot_R_subvco3))
       {val_pot100K = 199;
-      DebugPrintToken("ABOVE POSSIBLE R vco1",2);
+      DebugPrintToken("ABOVE POSSIBLE R vco1",5);
       return;} // R value is above max R obtainable with this setup, max out pots.
 
     if(R > R1O0Kb_total_R_subvco3) // in this case we use all the steps of pot4
@@ -1174,9 +1184,9 @@ void ChangeNote(byte pot_vals[12], byte (&curr_pot_vals)[12], DigiPot *ptr[12], 
   uint8_t max_pot;
   int16_t pot_val_change;
   //static byte curr_pot_vals[6] = {99,99,99,99,99,99};
-  DebugPrintStr("BEFORE CHNG\n",2);
-  PrintDigiPot(curr_pot_vals,vco*2,2);
-  PrintDigiPot(curr_pot_vals,vco*2 +1,2);
+  DebugPrintStr("BEFORE CHNG\n",5);
+  PrintDigiPot(curr_pot_vals,vco*2,5);
+  PrintDigiPot(curr_pot_vals,vco*2 +1,5);
   
   if (!val_saw) 
   {
@@ -1212,9 +1222,9 @@ void ChangeNote(byte pot_vals[12], byte (&curr_pot_vals)[12], DigiPot *ptr[12], 
   }
 
 
-  DebugPrintStr("AFTER CHNG\n",2);
-  PrintDigiPot(curr_pot_vals,vco*2,2);
-  PrintDigiPot(curr_pot_vals,vco*2 +1,2);
+  DebugPrintStr("AFTER CHNG\n",5);
+  PrintDigiPot(curr_pot_vals,vco*2,5);
+  PrintDigiPot(curr_pot_vals,vco*2 +1,5);
   
 
 
@@ -1313,14 +1323,15 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[12], double freq, double dut
   }
   
   DebugPrint("allR100steps_0", double(allR100steps_1), 5);
-  DebugPrint("allR100steps_1",double(allR100steps_2), 5);
-
+  DebugPrint("\nallR100steps_1",double(allR100steps_2), 5);
+  DebugPrintToken("\n",2);
 
   idx0 = 199 - allR100steps_1;
   idx1 = 199 - allR100steps_2;
 
   DebugPrint("idx0_est",double(idx0),5);
-  DebugPrint("idx1_est",double(idx1),5);
+  DebugPrint("\nidx1_est",double(idx1),5);
+  DebugPrintToken("\n",5);
 
 
   //coarse_freq table lookup index guess...
@@ -1334,8 +1345,8 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[12], double freq, double dut
 
 
   DebugPrint("f0_est",tmp_f1a,5);
-  DebugPrint("f1_est",tmp_f2a,5);
-
+  DebugPrint("\nf1_est",tmp_f2a,5);
+  DebugPrintToken("\n",5);
 
   //try to bracket the frequency between two steps without reading the whole array using estimated R step.
   // using sliding window, then select idx based on closest coarse frequency to required component frequency
@@ -1426,7 +1437,8 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[12], double freq, double dut
   }
   
   DebugPrint("idx0_real",double(idx0),5);
-  DebugPrint("idx1_real",double(idx1),5);
+  DebugPrint("\nidx1_real",double(idx1),5);
+  DebugPrintToken("\n",5);
 
 /*
    Serial1.print("<");
@@ -1482,10 +1494,11 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[12], double freq, double dut
   DebugPrintToken("NEW:",5); 
   PrintDigiPot(midi_to_pot_G,2*vco,5);
   PrintDigiPot(midi_to_pot_G,2*vco + 1,5);
-  DebugPrintToken("CUR:",5); 
+  DebugPrintToken("\nCUR:",5); 
   PrintDigiPot(curr_pot_vals,2*vco,5);
   PrintDigiPot(curr_pot_vals,2*vco + 1,5);
-  
+  DebugPrintToken("\n",5);
+
 
 
   /*
@@ -1514,9 +1527,11 @@ void GenerateArbitraryFreqDAC(byte (&curr_pot_vals)[12], double freq, double dut
 
   ChangeNote(midi_to_pot_G, curr_pot_vals, pots, true, vco);
 
-  DebugPrintToken("NEW_CUR:",5); 
+  DebugPrintToken("\nNEW_CUR:",5); 
   PrintDigiPot(curr_pot_vals,2*vco,5);
   PrintDigiPot(curr_pot_vals,2*vco + 1,5);
+  DebugPrintToken("\n",5);
+
 
 
 }
@@ -1611,7 +1626,8 @@ for(subvco = 0; subvco < 4; subvco++)
     digitalWrite(vco_pin, LOW); 
    }
 
-    DebugPrint("MIN_ALL_POTS_VCO",double(subvco),6);
+    DebugPrint("\nMIN_ALL_POTS_VCO",double(subvco),6);
+    DebugPrintToken("\n",6);
 
 
       for(m = max_pot*subvco; m < max_pot + max_pot*subvco; m++) {
@@ -1628,6 +1644,8 @@ for(subvco = 0; subvco < 4; subvco++)
       }
 
       DebugPrint("MIN_ALL_POTS_VCO_DONE",double(subvco),6);
+      DebugPrintToken("\n",6);
+
 
       delay(20000);
 
@@ -1636,7 +1654,9 @@ for(subvco = 0; subvco < 4; subvco++)
       {
         
         DebugPrint("MAX_POT_VCO",double(subvco),6);
-        DebugPrint("MAX_POT_VCO_M",double(m),6);
+        DebugPrint("\nMAX_POT_VCO_M",double(m),6);
+        DebugPrintToken("\n",6);
+
 
 
         for(k=0;k<100;k++)
@@ -1648,7 +1668,9 @@ for(subvco = 0; subvco < 4; subvco++)
         }
          
         delay(20000);
-        DebugPrint("MAX_ALL_POTS_VCO_DONE",double(subvco),6);
+        DebugPrint("\nMAX_ALL_POTS_VCO_DONE",double(subvco),6);
+        DebugPrintToken("\n",6);
+
       
 
         for(k=0;k<100;k++)
@@ -1813,7 +1835,7 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double fhigh, 
   millisstart = millis();
   while (totalpulses < samplesnumber) 
   {
-    delay(5);
+    delay(2);
     if (millispassed > millistimeout) {break;}
 
     if ( CaptureFlag == true) 
@@ -1852,12 +1874,13 @@ void CountFrequencyDelta2(byte samplesnumber,float tunefrequency, double fhigh, 
     
   }
 
-    DebugPrint("f_total_meas",f_meas,5);
+    DebugPrint("\nf_total_meas",f_meas,5);
     //SerialUSB.println("");
-    DebugPrint("fhigh_meas",fhigh_meas,5);
+    DebugPrint("\nfhigh_meas",fhigh_meas,5);
     //SerialUSB.println("");
-    DebugPrint("flow_meas",flow_meas,5);
+    DebugPrint("\nflow_meas",flow_meas,5);
     //SerialUSB.println("");
+    DebugPrintToken("\n",5);
 
     //DebugPrint("totalpulses",double(totalpulses),5);
   
@@ -1908,7 +1931,7 @@ void CountFrequency(uint8_t samplesnumber, double &f_meas, uint8_t subvco)
   millisstart = millis();
   while (totalpulses < samplesnumber) 
   {
-    delay(5);
+    delay(2);
     if (millispassed > millistimeout) {break;}
    /*
     pulsehigh = pulseIn(freq_meas_pin,HIGH,100000);
@@ -1956,7 +1979,9 @@ void CountFrequency(uint8_t samplesnumber, double &f_meas, uint8_t subvco)
     f_meas = f_total_measured; //+ f_err_calc;  
   }
 
-    DebugPrint("f_total_meas",f_meas,5);
+    DebugPrint("\nf_total_meas",f_meas,5);
+    DebugPrintToken("\n",5);
+
     //SerialUSB.println("");
     //DebugPrint("totalpulses",double(totalpulses),5);
   
@@ -1967,8 +1992,10 @@ void CountFrequencyDeltaGlobal(byte samplesnumber,float tunefrequency, double &f
     double f_meas = 0;
     CountFrequency(samplesnumber,f_meas,int(vco/2)*2); 
     f_err = f_meas - tunefrequency;
-    DebugPrint("f_total_meas",f_meas,4);
-    DebugPrint("f_total_gen",tunefrequency,4);
+    DebugPrint("\nf_total_meas",f_meas,4);
+    DebugPrint("\nf_total_gen",tunefrequency,4);
+    DebugPrintToken("\n",4);
+
 
 }
 
@@ -2130,8 +2157,11 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
     f_err_calc = 0.0;
     f_total_measured_compensated = f_total_measured + f_err_calc;
     f_global_err = f_total_measured_compensated - f_global;
-    DebugPrint("f_total_meas",f_total_measured_compensated,4);
-    DebugPrint("f_total_gen",f_global,4);
+
+    DebugPrint("\nf_total_meas",f_total_measured_compensated,4);
+    DebugPrint("\nf_total_gen",f_global,4);
+    DebugPrintToken("\n",4);
+
 
   } // end if (globaltune)
   
@@ -2141,9 +2171,10 @@ void SingleCountFrequencyDelta(byte samplesnumber,double f_global, double f_comp
       f_component_err = f_measured - f_component;
       f_global_err = 0.0;
 
-      DebugPrint("f_sng_cmp_meas",f_measured,4);
-      DebugPrint("f_sng_cmp_trg",f_component,4);
-      
+      DebugPrint("\nf_sng_cmp_meas",f_measured,4);
+      DebugPrint("\nf_sng_cmp_trg",f_component,4);
+      DebugPrintToken("\n",5);
+
   } // end else (!globaltune)
 
 }
@@ -2156,7 +2187,7 @@ void Generate_dV_to_dHz_Table(byte (&curr_pot_vals)[12],double center_freq, uint
   uint32_t baseaddr = 16384;
   uint32_t subvcoblock = 4096;
   uint32_t addr;
-  int i;
+  uint16_t i;
   double f_meas;
   double base_f_meas;
   double duty;
@@ -2170,7 +2201,10 @@ void Generate_dV_to_dHz_Table(byte (&curr_pot_vals)[12],double center_freq, uint
   duty = 0.5;
 
   GenerateArbitraryFreqDAC(curr_pot_vals, center_freq, duty, f1, f2, int(subvco/2));
-  DebugPrint("dV_dHz DAC:",double(subvco),0);
+
+  DebugPrint("\ndV_dHz DAC:",double(subvco),1);
+  DebugPrintToken("\n",1);
+
   //delay(10000);
 
   if (subvco < 2)
@@ -2184,38 +2218,46 @@ void Generate_dV_to_dHz_Table(byte (&curr_pot_vals)[12],double center_freq, uint
 
   Set_DAC(0,subvco);
   delay(10);
-  CountFrequency(220,f_meas, subvco);
+  CountFrequency(100,f_meas, subvco);
   base_f_meas = f_meas;
   char charfmeas[8];
-  DebugPrint("base_f_meas:", base_f_meas, 0);
+
+  DebugPrint("\nbase_f_meas:", base_f_meas, 1);
+  DebugPrintToken("\n",1);
+
 
   for (i=0;i<4095;i += 8)
   {
     addr = baseaddr + subvco*subvcoblock + sizeof(f_meas)*(i/8);
     Set_DAC(i,subvco);
-    CountFrequency(220,f_meas, subvco);
+    delay(10);
+    CountFrequency(100,f_meas, subvco);
     f_meas -= base_f_meas;
     dtostrf(f_meas, 7, 2, charfmeas);
-    flash.writeFloat(addr,f_meas);
-    DebugPrintStr("[",0);
-    DebugPrintStr(String(i),0);
-    DebugPrintStr(",",0);
+    //flash.writeFloat(addr,f_meas);
+    DebugPrintStr("[",1);
+    DebugPrintStr(String(i),1);
+    DebugPrintStr(",",1);
     SerialUSB.print(charfmeas);
-    Serial.flush();
-    DebugPrintStr("]",0);
-    DebugPrintStr("\n",0);
+    SerialUSB.flush();
+    DebugPrintStr("],",1);
+    DebugPrintStr("\n",1);
     
   }
 
 
 }
+
+
 void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex, double tunefrequency, double duty ,double fhigh, double flow, byte vco, bool order) 
 { 
 
   //Two components parallel tuning with weighted subosc error compensation
   // Tune both osc at the same time based on fhigh_meas_err and flow_meas_err
   // tune both osc at the same time based on f_total_err, using duty cycle as weighting for the period error.
-
+  // adaptive : use adaptive correction of DAC frequency to step gain between iterations.
+  bool adaptive = false;
+  uint16_t stabilization_delay = 5; //(ms)
   byte max_pot = 6;
   double f_meas = 0.0;
   double fhigh_meas = 0.0;
@@ -2224,45 +2266,46 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
   double flow_err = 0.0;
   double f_err = 0.0;
   
-  int max_integrations = 10;
-  float states_integrator[2][max_integrations];
+  uint8_t max_tunesteps = 10;
+  float f_err_history[2][max_tunesteps];
+  float dev_cents_history[2][max_tunesteps];
  
-  double dutycor;
+  double dutycor = duty;
   double dev_cents[2] = {0.0,0.0};
   const double tune_thresh = 2.5;
   uint16_t DAC_steps[2] = {0,0};
   
  
-  int p;
+  uint8_t p;
   uint8_t m;
 
   bool tuned[2] = {false,false};
-  double dintegrator = 0.0;
-  double dintegrator_p = 0.0;
+  //double dintegrator = 0.0;
+  //double dintegrator_p = 0.0;
   
   
-  float integrator = 0.0;
+  //float integrator = 0.0;
   //float integrator_1 = 0.0;
   //float min_integrator = 0.0;
 
   //int integrator_count = 0;
 
   //int best_index = 0;
-  byte curr_pot_val_bck = 0;
+  //byte curr_pot_val_bck = 0;
 
 
   if (duty >= 0.5) { dutycor = duty;}
-  else if (duty <= 0.5) { dutycor = 1 - duty;}
-  //min_integrator = fabs(states_integrator[0]);
+  else if (duty < 0.5) { dutycor = 1 - duty;}
+  //min_integrator = fabs(f_err_history[0]);
         
-  for (p=0;p<max_integrations;p++) 
+  for (p=0;p<max_tunesteps;p++) 
   {
 
    
       // measure both frequencies errors
       // f_err is : f_measured - f_target;
 
-
+      delay(stabilization_delay);
       CountFrequencyDelta2(10,tunefrequency,fhigh,flow,f_meas,fhigh_meas,flow_meas,f_err,vco);
       fhigh_err = fhigh_meas - fhigh;
       flow_err = flow_meas - flow;
@@ -2281,22 +2324,39 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
       DebugPrintToken("\n",5);
       
       //integrator = (float) dintegrator;
-      dev_cents[0] = 1200 * log(fhigh_meas/fhigh)/log(2);
-      dev_cents[1] = 1200 * log((flow_meas)/flow)/log(2);
-      
-      states_integrator[0][p] = fhigh_err;
-      states_integrator[1][p] = flow_err;
-      
-      
-      if (p > 0)
+      if (!tuned[0])
       {
-        if (!tuned[0]) {DAC_steps[0] = d_freq_to_DAC_steps(states_integrator[0][p],states_integrator[0][p-1],2*vco + !order);}
-        if (!tuned[1]) {DAC_steps[1] = d_freq_to_DAC_steps(states_integrator[1][p],states_integrator[1][p-1],2*vco + order);}
+        dev_cents[0] = 1200 * log(fhigh_meas/fhigh)/log(2);
+        f_err_history[0][p] = fhigh_err;
+        dev_cents_history[0][p] = dev_cents[0];
       }
       else
       {
-        if (!tuned[0]) {DAC_steps[0] = d_freq_to_DAC_steps(states_integrator[0][p],states_integrator[0][p],2*vco + !order);}
-        if (!tuned[1]) {DAC_steps[1] = d_freq_to_DAC_steps(states_integrator[1][p],states_integrator[1][p],2*vco + order);}
+        f_err_history[0][p] = 0.0;
+        dev_cents_history[0][p] = 0.0;
+      }
+      
+       if (!tuned[1])
+      {
+        dev_cents[1] = 1200 * log((flow_meas)/flow)/log(2);
+        f_err_history[1][p] = flow_err;
+        dev_cents_history[1][p] = dev_cents[1];
+      }
+      else
+      {
+        f_err_history[1][p] = 0.0;
+        dev_cents_history[1][p] = 0.0;
+      }
+      
+      if (p > 0)
+      {
+        if (!tuned[0]) {DAC_steps[0] = d_freq_to_DAC_steps(f_err_history[0][p],f_err_history[0][p-1],2*vco + !order, adaptive);}
+        if (!tuned[1]) {DAC_steps[1] = d_freq_to_DAC_steps(f_err_history[1][p],f_err_history[1][p-1],2*vco + order, adaptive);}
+      }
+      else
+      {
+        if (!tuned[0]) {DAC_steps[0] = d_freq_to_DAC_steps(f_err_history[0][p],f_err_history[0][p],2*vco + !order, adaptive);}
+        if (!tuned[1]) {DAC_steps[1] = d_freq_to_DAC_steps(f_err_history[1][p],f_err_history[1][p],2*vco + order, adaptive);}
       }
       
       if (!tuned[0]) {Adjust_DAC(DAC_steps[0],2*vco + !order);}
@@ -2304,14 +2364,14 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
       
       //vco formula global tune
    
-    if (fabs(dev_cents[0]) <= tune_thresh) 
+    if ((fabs(dev_cents[0]) <= tune_thresh) && (!tuned[0])) 
     { 
       tuned[0] = true;
       DebugPrint("THR_ATT",double(fabs(dev_cents[0])),2);
       DebugPrintToken("\n",2);
     } //end tune thresh att
 
-    if (fabs(dev_cents[1]) <= tune_thresh) 
+    if ((fabs(dev_cents[1]) <= tune_thresh) && (!tuned[1])) 
     { 
       tuned[1] = true;
       DebugPrint("THR_ATT",double(fabs(dev_cents[1])),2);
@@ -2320,9 +2380,23 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
 
     if (tuned[0] && tuned[1]) { break;}
 
-  } // end for p < max_integrations
+  } // end for p < max_tunesteps
 
   // now proportional error tuning.
+  DebugPrintToken("CENTS DEV TUNE HIST:\n",1);
+
+  for (m=0;m<2;m++)
+  {
+    DebugPrint("VCO:",double(m),1);
+    DebugPrintToken("\n",1);
+    for (p=0;p<max_tunesteps;p++) 
+    {
+      DebugPrint( "\n", dev_cents_history[m][p],1);
+      if (dev_cents_history[m][p] == 0.0) {break;}
+      
+    }
+  
+  }
 
   for(m = vco*max_pot; m < vco*max_pot + max_pot; m ++)
   {
@@ -2331,273 +2405,112 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
 
   PWM_DAC_Settings[noteindex][2*vco] = DAC_states[2*vco];
   PWM_DAC_Settings[noteindex][2*vco +1] = DAC_states[2*vco +1];
+  CountFrequencyDelta2(10,tunefrequency,fhigh,flow,f_meas,fhigh_meas,flow_meas,f_err,vco);
+  PWM_Real_Duty[noteindex][vco] = (1/(2*fhigh_meas))/(1/f_meas);
   
 
 } // end NewAutotuneDAC2
 
-void NewAutoTuneDAC(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex, double tunefrequency, double duty ,double freq, bool level, byte subvco, bool globaltune) 
-{ 
-  byte max_pot = 3;
-  // if minfreq, set it right away
-
-/*
-  if (freq == minfreq)
-  {
-    MaxVcoPots(ptr,curr_pot_vals,subvco);
-    DebugPrintToken("MINFREQ_SET",3);
-    PWM_Note_Settings[noteindex][subvco*max_pot] = 99;
-    PWM_Note_Settings[noteindex][subvco*max_pot +1] = 99;
-    PWM_Note_Settings[noteindex][subvco*max_pot +2] = 99;
-     
-    //if (globaltune != true) {InTuning = false;}
-    return;
-  }
-*/
-  //int num_integrations = 0;
-  int max_integrations = 10;
-  //int states[max_integrations][3];
-  float states_integrator[max_integrations];
- 
-  
-  
-  double dutycor;
-  double dev_cents = 0.0;
-  //double dev_cents_back = 0.0;
-  const double tune_thresh = 2.5;
-  uint16_t DAC_steps = 0;
-  
- 
-  int p;
-  uint8_t m;
-
-  //int bias;
-
-  bool tuned = false;
-  double dintegrator = 0.0;
-  double dintegrator_p = 0.0;
-  //double dintegrator_p_1 = 0.0;
-  
-  
-  float integrator = 0.0;
-  //float integrator_1 = 0.0;
-  //float min_integrator = 0.0;
-
-  //int integrator_count = 0;
-
-  //int best_index = 0;
-  byte curr_pot_val_bck = 0;
-
-
-  if (duty >= 0.5) { dutycor = duty;}
-  else if (duty <= 0.5) { dutycor = 1 - duty;}
-  //min_integrator = fabs(states_integrator[0]);
-        
-  for (p=0;p<max_integrations;p++) 
-  {
-
-    if (globaltune)
-    {
-      //CountFrequencyDeltaGlobal(50,tunefrequency,dintegrator);
-      //SingleCountFrequencyDelta(50,freq,dintegrator_p,level);
-      //MIDI.sendNoteOn(70, 127, 1);
-      SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,true,int(subvco/2)); 
-      //MIDI.sendNoteOn(71, 127, 1);
-      DebugPrint("global_err",dintegrator,2);
-      DebugPrintToken("\n",2);
-      
-      DebugPrint("subvco",double(subvco),5);
-      DebugPrintToken("\n",5);
-      
-      integrator = (float) dintegrator;
-      dev_cents = 1200 * log((integrator + tunefrequency)/tunefrequency)/log(2);
-      //DAC_steps = d_freq_to_DAC_steps(dintegrator_p,subvco);
-      states_integrator[p] = dintegrator/dutycor;
-      
-      if (p > 0)
-      {
-        //DAC_steps = d_freq_to_DAC_steps(states_integrator[p],states_integrator[p-1],subvco,globaltune);
-      }
-      else
-      {
-        //DAC_steps = d_freq_to_DAC_steps(states_integrator[p],states_integrator[p],subvco,globaltune);
-      }
-      
-      Adjust_DAC(DAC_steps,subvco);
-      //vco formula global tune
-
-    }
-    else
-    {
-      //MIDI.sendNoteOn(72, 127, 1);
-      SingleCountFrequencyDelta(50,tunefrequency,freq,dintegrator,dintegrator_p,level,false,int(subvco/2)); 
-      //MIDI.sendNoteOn(73, 127, 1);
-      //SingleCountFrequencyDelta(50,freq,dintegrator,level);
-      DebugPrint("comp_err",dintegrator_p,2);
-      DebugPrintToken("\n",2);
-      
-      DebugPrint("subvco",double(subvco),5);
-      DebugPrintToken("\n",5);
-             
-      integrator = (float) dintegrator_p;
-      states_integrator[p] = integrator;
-      dev_cents = 1200 * log((integrator + freq)/freq)/log(2);
-      
-      if (p > 0)
-      {
-        //DAC_steps = d_freq_to_DAC_steps(states_integrator[p],states_integrator[p-1],subvco,globaltune);
-      }
-      else
-      {
-        //DAC_steps = d_freq_to_DAC_steps(states_integrator[p],states_integrator[p],subvco,globaltune);
-      }
-      
-      Adjust_DAC(DAC_steps,subvco);
-      //vco formula single tune
-
-    } // end if globaltune
-
-    if (fabs(dev_cents) <= tune_thresh) 
-    { 
-      tuned = true;
-      DebugPrint("THR_ATT",double(fabs(dev_cents)),2);
-      DebugPrintToken("\n",2);
-      //states[p][0] = curr_pot_vals[subvco*max_pot];
-      //states[p][1] = curr_pot_vals[subvco*max_pot+1];
-      //states[p][2] = curr_pot_vals[subvco*max_pot+2];
-      //states_integrator[p] = integrator;
-      break;
-    } //end tune thresh att
-
-      //states[p][0] = curr_pot_vals[subvco*max_pot];
-      //states[p][1] = curr_pot_vals[subvco*max_pot+1];
-      //states[p][2] = curr_pot_vals[subvco*max_pot+2];
-      //states_integrator[p] = integrator;
-        
-  } // end for p < max_integrations
-
-  for(m = subvco*max_pot; m < subvco*max_pot + max_pot; m ++)
-  {
-    PWM_Note_Settings[noteindex][m] = curr_pot_vals[m];
-    PWM_DAC_Settings[noteindex][subvco] = DAC_states[subvco];
-  }
-
-} // end NewAutotuneDAC
-/*
-void Attack_Decay_Sustain()
-{
-  byte r = 1;
-  byte s = 0;
-  while(s<31)
-  {
-    pot12.decrease(r);
-    r = byte(int(r*1.5 +0.5));
-    s += r;
-    delayMicroseconds(10000);
-  }
-
-}
-*/
-/*
-void Release()
-{
-  byte r = 1;
-  byte s = 0;
-  while(s<31)
-  {
-    pot12.increase(r);
-    r = byte(int(r*1.5 +0.5));
-    s += r;
-    delayMicroseconds(10000);
-  }
-}
-*/
-
-
 void handleControlChange(byte channel, byte ccnum, byte val)
 {
 
-// https://www.midi.org/specifications-old/item/table-3-control-change-messages-data-bytes-2
-// Add RPN support for OSC 01 to 23 tune.
+  // https://www.midi.org/specifications-old/item/table-3-control-change-messages-data-bytes-2
+  // Add RPN support for OSC 01 to 23 tune.
+  switch (ccnum)
+  {  
 
-  if (ccnum == 73) {
+    case 73:
 
-    // attack pot. LSB 0 to 127.
-    if (val > 99) { attack = 99;}
-    else { attack = val;}
+      // attack pot. LSB 0 to 127.
+      if (val > 99) { attack = 99;}
+      else { attack = val;}
 
-    chng_attack = attack - cur_attack;
-    if (chng_attack > 0) {
-    pot12.increase(chng_attack);
-    }
-    else {
-    pot12.decrease(abs(chng_attack));
-    }
-    cur_attack = attack;
+      chng_attack = attack - cur_attack;
+      if (chng_attack > 0) {
+      pot12.increase(chng_attack);
+      }
+      else {
+      pot12.decrease(abs(chng_attack));
+      }
+      cur_attack = attack;
+      break;
 
-  }
+    case 75:
 
-  if (ccnum == 75) {
+      // decay pot. LSB 0 to 127.
+      if (val > 99) { decay = 99;}
+      else { decay = val;}
 
-    // decay pot. LSB 0 to 127.
-    if (val > 99) { decay = 99;}
-    else { decay = val;}
+      chng_decay = decay - cur_decay;
+      if (chng_decay > 0) {
+      pot13.increase(chng_decay);
+      }
+      else {
+      pot13.decrease(abs(chng_decay));
+      }
+      cur_decay = decay;
+      break;
+    
+    case 76:
 
-    chng_decay = decay - cur_decay;
-    if (chng_decay > 0) {
-    pot13.increase(chng_decay);
-    }
-    else {
-    pot13.decrease(abs(chng_decay));
-    }
-    cur_decay = decay;
+      // semitone pot shift for OSC2 -12 to +12 LSB 0 to 127.
+      if (val > 23) { osc2noteshift = 12;}
+      else { osc2noteshift =  val  - 12;}
+      break;
+    
 
-  }
+    case 77: 
+    
+      // hardsync pot. LSB 0 to 63 and 64 to 127. (> 64 hardsync disabled)
+      if (val > 64) { digitalWrite(hspin,HIGH);}
+      else { digitalWrite(hspin,LOW);}
+      break;
 
-  if (ccnum == 76) 
-  {
+    case 80:
 
-    // semitone pot shift for OSC2 -12 to +12 LSB 0 to 127.
-    if (val > 23) { osc2noteshift = 12;}
-    else { osc2noteshift =  val  - 12;}
+      // osc1 volume pot. LSB 0 to 127.
+      if (val > 99) { mix1 = 99;}
+      else { mix1 = val;}
 
-  }
-
-
-  if (ccnum == 80) {
-
-    // osc1 volume pot. LSB 0 to 127.
-    if (val > 99) { mix1 = 99;}
-    else { mix1 = val;}
-
-    chng_mix1 = mix1 - cur_mix1;
-    if (chng_mix1 > 0) {
-    pot14.increase(chng_mix1);
-    }
-    else {
-    pot14.decrease(abs(chng_mix1));
-    }
-    cur_mix1 = mix1;
-  }
-
-
-  if (ccnum == 81) {
-
-    // osc2 volume pot. LSB 0 to 127.
-    if (val > 99) { mix2 = 99;}
-    else { mix2 = val;}
-
-    chng_mix2 = mix2 - cur_mix2;
-    if (chng_mix2 > 0) {
-    pot15.increase(chng_mix2);
-    }
-    else {
-    pot15.decrease(abs(chng_mix2));
-    }
-    cur_mix2 = mix2;
-  }
+      chng_mix1 = mix1 - cur_mix1;
+      if (chng_mix1 > 0) {
+      pot14.increase(chng_mix1);
+      }
+      else {
+      pot14.decrease(abs(chng_mix1));
+      }
+      cur_mix1 = mix1;
+      break;
 
 
-}
+    case 81:
+
+      // osc2 volume pot. LSB 0 to 127.
+      if (val > 99) { mix2 = 99;}
+      else { mix2 = val;}
+
+      chng_mix2 = mix2 - cur_mix2;
+      if (chng_mix2 > 0) {
+      pot15.increase(chng_mix2);
+      }
+      else {
+      pot15.decrease(abs(chng_mix2));
+      }
+      cur_mix2 = mix2;
+      break;
+
+    case 82:
+
+      cents_detune[0] = val - 64;
+      break;
+
+    case 83:
+
+      cents_detune[1] = val - 64;
+      break;
+    
+  } // end switch case ccnum
+} // end handleControlChange
 
 void handleNoteOn(byte channel, byte pitch, byte velocity)
 {
@@ -2607,7 +2520,12 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   double f1_meas = 0.0;
   double f2_meas = 0.0;
   double f_err = 0.0;
-  double duty = 0.33;
+
+  bool order[2] = {0,0};
+  double duty[2] = {0.48,0.48};
+  double real_duty[2] = {0.0,0.0};
+  double LFOFreq[2] = {0.2,0.2};
+  float PWMDepth = 0.06;
   double notefreq[2];
   double osc2notefreq;
   uint8_t i;
@@ -2649,6 +2567,18 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   {
     //MIDI.sendNoteOn(44, 127, 1);
     DebugPrintToken("ALREADY_TUNED",1);
+    if (cents_detune[0] == 0)
+      {notefreq[0] = notes_freq[noteindexes[0]];}
+    else
+      {notefreq[0] = exp(cents_detune[0]*log(2)/1200 + log(notes_freq[noteindexes[0]]));}
+    
+    if (cents_detune[1] == 0)
+      {notefreq[1] = notes_freq[noteindexes[1]];}
+    else
+      {notefreq[1] = exp(cents_detune[1]*log(2)/1200 + log(notes_freq[noteindexes[1]]));}
+    
+    inv_gate_period_micros = (1.0/(2.0*notefreq[0]))*1E6;
+
     for(i=0;i<6;i++)
     {
       midi_to_pot_G[i] = PWM_Note_Settings[noteindexes[0]][i];
@@ -2673,7 +2603,15 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     Set_DAC(PWM_DAC_Settings[noteindexes[1]][2],2);
     Set_DAC(PWM_DAC_Settings[noteindexes[1]][3],3);
     
-    
+    if (!InitialTune)
+    {
+      if (duty[0] <= 0.5) {order[0] = false;} else {order[0] = true;}
+      if (duty[1] <= 0.5) {order[1] = false;} else {order[1] = true;}
+      
+      Enable_PWM_Mod_by_LFO(PWMDepth,PWM_Real_Duty[noteindexes[0]][0],LFOFreq[0],notefreq[0],0,order[0]);
+      Enable_PWM_Mod_by_LFO(PWMDepth,PWM_Real_Duty[noteindexes[1]][1],LFOFreq[1],notefreq[1],1,order[1]);
+    }
+
     /*
     Serial1.print("S");
     Serial1.print(String(float(noteindex),3));
@@ -2687,7 +2625,7 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   //MIDI.sendNoteOn(45, 127, 1);
   
   // TO DO :manage both suboscs.
-  /*
+  
   if ((ADSR_DAC_State[0] != ADSR_Disable) && (ADSR_DAC_State[0] != ADSR_Disabled))
   {
     ADSR_DAC_State[0] = ADSR_AttackInit;
@@ -2697,22 +2635,30 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
   {
     ADSR_DAC_State[1] = ADSR_AttackInit;
   }
-  */
+  
   //pot12.decrease(30);
   //notefreq[0] = double(pgm_read_float(&(notes_freq[noteindex])));
   //notefreq[1] = double(pgm_read_float(&(notes_freq[osc2noteindex])));
-  notefreq[0] = notes_freq[noteindexes[0]];
-  notefreq[1] = notes_freq[noteindexes[1]];
-
+  
+  if (cents_detune[0] == 0)
+    {notefreq[0] = notes_freq[noteindexes[0]];}
+  else
+    {notefreq[0] = exp(cents_detune[0]*log(2)/1200 + log(notes_freq[noteindexes[0]]));}
+  
+  if (cents_detune[1] == 0)
+    {notefreq[1] = notes_freq[noteindexes[1]];}
+  else
+    {notefreq[1] = exp(cents_detune[1]*log(2)/1200 + log(notes_freq[noteindexes[1]]));}
+  
 
   DebugPrint("NOTEFREQ0",notefreq[0],2);
   DebugPrint("NOTEFREQ1",notefreq[1],2);
   
-
-  MaxVcoPots(pots,midi_to_pot,0);
-  MaxVcoPots(pots,midi_to_pot,1);
-  MaxVcoPots(pots,midi_to_pot,2);
-  MaxVcoPots(pots,midi_to_pot,3);
+  // faster_tune_test
+  //MaxVcoPots(pots,midi_to_pot,0);
+  //MaxVcoPots(pots,midi_to_pot,1);
+  //MaxVcoPots(pots,midi_to_pot,2);
+  //MaxVcoPots(pots,midi_to_pot,3);
   
   //MIDI.sendNoteOn(46, 127, 1);
   
@@ -2731,7 +2677,7 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
     DebugPrint("BEFORE ARB FREQ:",double(i),5);
     //CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
        
-    GenerateArbitraryFreqDAC(midi_to_pot,notefreq[i], duty, f1, f2, i); // O is for VCO 0 (not subvco)
+    GenerateArbitraryFreqDAC(midi_to_pot,notefreq[i], duty[i], f1, f2, i); // O is for VCO 0 (not subvco)
     
     DebugPrint("AFTER ARB FREQ:",double(i),5);
     //CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
@@ -2787,26 +2733,32 @@ void handleNoteOn(byte channel, byte pitch, byte velocity)
         DebugPrintStr("TUNE CASE 3:",2);
     
         //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f2,1,2*i,0);
-        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,f2,i,0);
+        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreq[i],duty[i],f1,f2,i,0);
+
+        DebugPrint("REAL_DUTY", PWM_Real_Duty[noteindexes[i]][i], 2);
+        DebugPrintStr("\n",2);
 
         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
         //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,0,2*i + 1,1);
         
-        CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        //CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
         
     }
     else if (f1 > f2)
     {
 
         // when duty < 0.5
-        DebugPrintStr("TUNE CASE 4:",2);
+        DebugPrintStr("TUNE CASE 4:\n",2);
         //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,1,2*i,0);
-        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,f2,i,1);
+        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreq[i],duty[i],f1,f2,i,1);
+
+        DebugPrint("REAL_DUTY", PWM_Real_Duty[noteindexes[i]][i], 2);
+        DebugPrintStr("\n",2);
 
         //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
         //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f2,0,2*i + 1,1);
         
-        CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        //CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
         
     }
 
@@ -2838,14 +2790,32 @@ void handleNoteOff(byte channel, byte pitch, byte velocity) {
   if ((ADSR_DAC_State[0] != ADSR_Disable) && (ADSR_DAC_State[0] != ADSR_Disabled))
   {
     ADSR_DAC_State[0] = ADSR_ReleaseInit;
+    DebugPrint("to_ADSR_RELEASE_INIT",double(0),2);
   }
 
   if ((ADSR_DAC_State[1] != ADSR_Disable) && (ADSR_DAC_State[1] != ADSR_Disabled))
   {
+    DebugPrint("to_ADSR_RELEASE_INIT",double(1),2);
     ADSR_DAC_State[1] = ADSR_ReleaseInit;
   }
  
   //pot12.increase(30);
+}
+
+void TuneAll()
+
+{
+  uint8_t k;
+
+  for (k = 0;k < 49;k++)
+  {
+    handleNoteOn(0,k+48,127);
+    delay(200);
+    handleNoteOff(0,k+48,127);
+  }
+
+  InitialTune = false;
+
 }
 
 void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)[12], uint8_t subvco)
@@ -2865,6 +2835,10 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)
   // tuneblock is for ONE potentiometer.
   int tuneblock_size = 100*(sizeof(f_meas));
   //DebugPrint("WRITE COARSE VCO:",double(subvco),2);
+
+  // make sure DAC is at middle setting.
+  Set_DAC(2047,subvco);
+  
   if (subvco < 2)
   {
     digitalWrite(vco0_pin, !(subvco % 2));
@@ -2887,6 +2861,8 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)
   }
 
   
+  DebugPrint("SUBVCO:",double(subvco),2);
+      
   for(m=max_pot*subvco + 1;m<=max_pot*subvco + 2;m++)
   {
     //DebugPrint("WRITE COARSE POT:",double(m),2);
@@ -2896,14 +2872,14 @@ void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)
 
       DebugPrint("STEP:",double(k),2);
       SerialUSB.println("");
-      Serial.flush();
-      CountFrequency(220, f_meas, subvco);
+      SerialUSB.flush();
+      CountFrequency(100, f_meas, subvco);
       //DebugPrint("FREQ:",f_meas,2);
       int addr = prev_data_offset + (2*subvco + (m -(max_pot*subvco +1)))*tuneblock_size + (99-k)*(sizeof(f_meas));
       DebugPrint("ADDR:",double(addr),2);
-      DebugPrint("FREQ:",double(f_meas),4);
+      DebugPrint("FREQ:",double(f_meas),2);
       SerialUSB.println("");
-      Serial.flush();
+      SerialUSB.flush();
       flash.writeFloat(addr,f_meas);
       delay(500);
       //EEPROM.put(addr,f_meas);
@@ -2949,7 +2925,7 @@ void ReadAllCoarseFrequencies(uint8_t subvco)
       DebugPrint("ADDR:",double(addr),2);
       DebugPrint("FREQ:",coarse_freq[subvco][k],4);
       SerialUSB.println("");
-      Serial.flush();
+      SerialUSB.flush();
 
       //EEPROM.get(addr,*(*(coarse_freq +vco)+k));
       // we had written frequencies in increasing order
@@ -3161,23 +3137,28 @@ void setup()
   char charfreq[8];
   char printcharfreq[10];
   Serial.begin(9600);
-  SerialUSB.begin(115200);
+  if (DebugLevel != 0)
+  {
+    SerialUSB.begin(115200);
 
-  while (!SerialUSB) {
-    digitalWrite(13,LOW);
-    delay(1000);
-    digitalWrite(13,HIGH);
-    ; // wait for serial port to connect
+    while (!SerialUSB) 
+    {
+      digitalWrite(13,LOW);
+      delay(1000);
+      digitalWrite(13,HIGH);
+      // wait for serial port to connect
+    }
+    
+    SerialUSB.print("SERIAL 115200");
+    //Serial.print(charspeed);
   }
-  SerialUSB.print("SERIAL 115200");
-  //Serial.print(charspeed);
-
   pinMode(24,OUTPUT);
   digitalWrite(24,LOW);
 
   pinMode(gatepin, OUTPUT);
   pinMode(hspin,OUTPUT);
   
+  // disable HardSync at startup
   digitalWrite(hspin, HIGH);
 
   bool flash_status;
@@ -3224,17 +3205,50 @@ void setup()
   Set_DAC(2047,3);
   MCPdac.enable(true);
   
+  // previous
+  /*
   DAC_gain[0] = -8.863;
   DAC_gain[1] = -8.807;
-  // modify these values after calibration
   DAC_gain[2] = -8.813;
   DAC_gain[3] = -8.831;
   
   DAC_cor[0] = 29.37;
   DAC_cor[1] = 42.77;
-  // modify these values after calibration
   DAC_cor[2] = 8.76;
   DAC_cor[3] = 52.26;
+  */
+  //old (before adding indcuctors)
+  /*
+  DAC_gain[0] = -8.8473;
+  DAC_gain[1] = -8.8702;
+  DAC_gain[2] = -8.7908;
+  DAC_gain[3] = -8.8144;
+  
+  DAC_cor[0] = 7.4650;
+  DAC_cor[1] = 19.5841;
+  DAC_cor[2] = 36.2866;
+  DAC_cor[3] = 31.6796;
+  */
+
+/*
+  DAC_gain[0] = -9.1085;
+  DAC_gain[1] = -9.1340;
+  DAC_gain[2] = -9.116;
+  DAC_gain[3] = -9.1385;
+*/  
+
+
+  DAC_gain[0] = -9.10277;
+  DAC_gain[1] = -9.10866;
+  DAC_gain[2] = -9.11105;
+  DAC_gain[3] = -9.12003;
+
+  DAC_cor[0] = 0.3729;
+  DAC_cor[1] = -0.6215;
+  DAC_cor[2] = 0.957;
+  DAC_cor[3] = 3.0808;
+
+ 
 
   ADSR_nb_samples[0] = 1000;
   ADSR_nb_samples[1] = 1000;
@@ -3262,7 +3276,7 @@ void setup()
   bool writecoarsefreqs = false; // also read coarse freqs at the end.
   bool readcoarsefreqs = false;
   midimode = true;
-  bool donothing = false;
+  bool donothing = true;
 
   uint8_t vco_pin = 4;
   uint8_t max_pot = 3;
@@ -3286,15 +3300,14 @@ void setup()
     SerialUSB.flush();   
     delay(3000);
     SerialUSB.print("5");
-    Serial.flush();
+    SerialUSB.flush();
     //SerialUSB.print(String(flash_status));
     //SerialUSB.print(String(flash.getManID()));
   }
   StartAllPots(allpots);
   
-  SerialUSB.print("5.1");
-  SerialUSB.flush();
-  
+  DebugPrintToken("POTS_STARTED\n",1);
+
   for (k=0;k<49;k++)
   {
     for(n=0;n<14;n++)
@@ -3303,8 +3316,9 @@ void setup()
     }    
   }
   
-  SerialUSB.print("6");
-  SerialUSB.flush();
+
+  DebugPrintToken("NOTES_SETTINGS_ZEROED\n",1);
+  
   freqrefpin = 9;
   subvco = 0;
   // select subvco 0 by default
@@ -3321,17 +3335,22 @@ void setup()
   MaxVcoPots(pots,midi_to_pot,3);
 
   MaxRemPots(allpots);
-  SerialUSB.print("7");
-  SerialUSB.flush();
+  
+  
+  DebugPrintToken("ALL_POTS_MAXED\n",1);
+
   //DACTEST
   //pot1.decrease(99);
   //pot4.decrease(99);
 
   //pot12.increase(99);
-  delay(5000);
+  delay(500);
   //SerialUSB.print("8");
   //Serial.flush();
   //pot12.decrease(30);
+  InitADSR(0,10,30,30,20,30,120);
+  InitADSR(1,10,10,30,50,30,120);
+  
   
 
   byte pot_vals[49][12];
@@ -3350,22 +3369,15 @@ void setup()
     pot_vals[0][i] = 99;
   }
   pot_devs[0] = 0.0;
-  SerialUSB.print("9");
-  SerialUSB.flush();
-  
 
-  if (donothing) 
-  {
-    //Serial.begin(9600);
-    //DebugPrintStr("SERIAL 9600",0);
-    SerialUSB.print("10");
-    SerialUSB.flush();
-    return;
-  }
+
+  DebugPrintToken("POTS_VALS_MAXED\n",1);
+
 
   if (midimode) 
   { 
 
+    TuneAll();
     // Connect the handleNoteOn function to the library,
     // so it is called upon reception of a NoteOn.
     MIDI.setHandleNoteOn(handleNoteOn);  // Put only the name of the function
@@ -3376,16 +3388,19 @@ void setup()
     
     MIDI.begin(0);
     Serial.begin(9600);
-    //Serial1.begin(9600);
-    //SerialUSB.print(charspeed);
-    //Serial.flush();
-  
+    return;
+  }
+
+  if (donothing) 
+  {
+    //Serial.begin(9600);
+    //DebugPrintStr("SERIAL 9600",0);
+    DebugPrintToken("DO_NOTHING_RETURN\n",1);
     return;
   }
   
   if (writecoarsefreqs)
   {
-
 
     //flash.eraseSection(0,4096);
     flash.eraseSection(4096,4096);  
@@ -3473,44 +3488,39 @@ void setup()
     GenerateArbitraryFreqDAC(midi_to_pot,400.0, 0.5, f1, f2,0); // 0 is for VCO 0 not subvco.
     delay(120000);
     SerialUSB.print("<generating freq end>");
-    Serial.flush();
+    SerialUSB.flush();
     return;
   }
 
-  notestart = 1;
-  noteend = 49;
+  notestart = 20;
+  noteend = 21;
 
   for (subvco = 0; subvco < 4; subvco++)
   {
     midi_to_pot[subvco*max_pot +2] = pot_vals[notestart - 1][subvco*max_pot + 2];
     midi_to_pot[subvco*max_pot +1] = pot_vals[notestart - 1][subvco*max_pot + 1];
     midi_to_pot[subvco*max_pot] = pot_vals[notestart - 1][subvco*max_pot];
+
+
+    SerialUSB.print("<");
+    SerialUSB.print(midi_to_pot[subvco*max_pot +2]);
+    SerialUSB.print(",");
+    SerialUSB.print(midi_to_pot[subvco*max_pot +1]);
+    SerialUSB.print(",");
+    SerialUSB.print(midi_to_pot[subvco*max_pot]);
+    SerialUSB.print(">");
+    SerialUSB.flush();
+
+  
+
+    float integrator;
+    char charintegratorfmt[13];
+    char charintegrator[7];
+
+
+    SetNotePots(pots,midi_to_pot,0,subvco);
+  
   }
-
-  SerialUSB.print("<");
-  SerialUSB.print(midi_to_pot[subvco*max_pot +2]);
-  SerialUSB.print(",");
-  SerialUSB.print(midi_to_pot[subvco*max_pot +1]);
-  SerialUSB.print(",");
-  SerialUSB.print(midi_to_pot[subvco*max_pot]);
-  SerialUSB.print(">");
-  Serial.flush();
-
-  float integrator;
-  char charintegratorfmt[13];
-  char charintegrator[7];
-
-
-  SetNotePots(pots,midi_to_pot,0,subvco);
-
-
-  SerialUSB.print("<midi_to_pot:");
-  SerialUSB.print(midi_to_pot[subvco*max_pot +2]);
-  SerialUSB.print(midi_to_pot[subvco*max_pot +1]);
-  SerialUSB.print(midi_to_pot[subvco*max_pot]);
-  SerialUSB.print(">");
-  Serial.flush();
-
 
   notefreq = pgm_read_float(&(notes_freq[notestart-1]));
   /*
@@ -3530,7 +3540,7 @@ void setup()
     ReadAllCoarseFrequencies(1); // populating global coarse_freq array from flash
     ReadAllCoarseFrequencies(2); // populating global coarse_freq array from flash
     ReadAllCoarseFrequencies(3); // populating global coarse_freq array from flash
- 
+
   }  
   
   for (k=notestart;k<noteend;k++) 
@@ -3545,16 +3555,22 @@ void setup()
     //checkserial();
     sprintf(printcharfreq,"<F%s>", charfreq);
     SerialUSB.print(printcharfreq);
-    Serial.flush();
+    SerialUSB.flush();
 
     if (generatedVdHzTable)
     {
       MaxVcoPots(pots,midi_to_pot,0);
       MaxVcoPots(pots,midi_to_pot,1);
+      MaxVcoPots(pots,midi_to_pot,2);
+      MaxVcoPots(pots,midi_to_pot,3);
+    
       DebugPrintStr("POTS MAXED",2);
       delay(10000);
       Generate_dV_to_dHz_Table(midi_to_pot,notefreq,0);
       Generate_dV_to_dHz_Table(midi_to_pot,notefreq,1);
+      Generate_dV_to_dHz_Table(midi_to_pot,notefreq,2);
+      Generate_dV_to_dHz_Table(midi_to_pot,notefreq,3);
+      
       continue;
     }
 
@@ -3592,7 +3608,7 @@ void setup()
       SerialUSB.print("<Generated_f2=");
       SerialUSB.print(String(f2,3));
       SerialUSB.print(">");
-      Serial.flush();
+      SerialUSB.flush();
       
 
       //digitalWrite(vco_pin,0);
@@ -3604,55 +3620,55 @@ void setup()
       // to do : check if that section is still required.
       if ((f1 == minfreq) || (f1 == maxfreq))
       {
-         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,0);
+         //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,0);
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,1);
+         //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,1);
          tuneend = millis() - tunestart;
          SerialUSB.print("<TUNETIME=");
          SerialUSB.print(tuneend);
          SerialUSB.print(">");
-         Serial.flush();
+         SerialUSB.flush();
          // TO DO : manage both OSCs
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,0);
          //CountFrequencyDeltaGlobal(50,notefreq,f_err);
       }
       else if ((f2 == minfreq) || (f2 == maxfreq))
       {
-         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,0);
+         //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,0);
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,1);
+         //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,1);
          tuneend = millis() - tunestart;
          SerialUSB.print("<TUNETIME=");
          SerialUSB.print(tuneend);
          SerialUSB.print(">");
-         Serial.flush();
+         SerialUSB.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,0);
       }
       // end check if that section is still required.
       else if (f1 <= f2)
       {
-         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,0);
+         //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,0);
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,1);
+         //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,1);
          tuneend = millis() - tunestart;
          SerialUSB.print("<TUNETIME=");
          SerialUSB.print(tuneend);
          SerialUSB.print(">");
-         Serial.flush();
+         SerialUSB.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,0);
    
 
       }
       else if (f1 > f2)
       {
-         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,0);
+         //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,0,0);
          //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-         NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,1);
+         //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,1,1);
          tuneend = millis() - tunestart;
          SerialUSB.print("<TUNETIME=");
          SerialUSB.print(tuneend);
          SerialUSB.print(">");
-         Serial.flush();
+         SerialUSB.flush();
          CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,0);
          //CountFrequencyDeltaGlobal(50,notefreq,f_err);
       }
@@ -3674,7 +3690,7 @@ void setup()
       SerialUSB.print(">");
       SerialUSB.println("");
       SerialUSB.println("");
-      Serial.flush();
+      SerialUSB.flush();
      
     } // end check notes formula DAC
     // test 
@@ -3683,7 +3699,7 @@ void setup()
       //checkserial();
       //delay(10);
       SerialUSB.print(charend);
-      Serial.flush();
+      SerialUSB.flush();
       delay(10); 
     }
       // test       
@@ -3701,8 +3717,8 @@ void setup()
     if (checkPWM_LFO)
     {
       float PWMDepth = 0.1;
-      Enable_PWM_Mod_by_LFO(PWMDepth,0.5,0.1,notefreq,0);
-      Enable_PWM_Mod_by_LFO(PWMDepth,0.5,0.1,notefreq,1);
+      Enable_PWM_Mod_by_LFO(PWMDepth,0.5,0.1,notefreq,0,0);
+      Enable_PWM_Mod_by_LFO(PWMDepth,0.5,0.1,notefreq,1,0);
       
       //int i;
       /*
@@ -3724,7 +3740,7 @@ void setup()
       //checkserial();
       //delay(10);
       SerialUSB.print(charend);
-      Serial.flush();
+      SerialUSB.flush();
       //delay(10); 
   
     }  
@@ -3803,7 +3819,7 @@ void setup()
 
 
     SerialUSB.print(charackdev);
-    Serial.flush();
+    SerialUSB.flush();
     /*
     Serial1.print("<rpot2=");
     Serial1.print(rpot2);
@@ -3868,7 +3884,15 @@ void loop() {
   static long ADSR_currentsample[2] = {0,0};
   static long ADSR_prevsample[2] = {0,0};
   static long ADSR_basesample[2] = {0,0};
+  
   uint8_t k;
+  uint8_t tmp_ADSR_DAC_State;
+
+
+  static long Gate_prevsample = 0;
+  static long Gate_basesample = 0;
+  static long Gate_currentsample = 0;
+  static bool Gate_Level = false;
 
   if (midimode)
   {
@@ -3879,119 +3903,166 @@ void loop() {
     //digitalWrite(LED_BUILTIN, LOW);
     
     //MIDI.sendNoteOn(80, 127, 1);
-    return;
-  }
-  
-/*
-  for(k=0;k<2;k++)
-  {
-    switch(ADSR_DAC_State[k])
+
+    if (Gate_DAC)
     {
-      case ADSR_Disabled:
-        break;
-
-      case ADSR_Sustain:
-        break;
-
-      case ADSR_Off:
-        break;
-
-      case ADSR_Disable:
-        Set_DAC(4095,4);
-        ADSR_DAC_State[k] = ADSR_Disabled;
-        break;
-
-      case ADSR_AttackInit:
-        Set_DAC(0,4);
-        ADSR_basesample[k] = long(micros()*inv_sample_adsr_inc_micros[k*2] + 0.5);
-        ADSR_prevsample[k] = 0;
-        ADSR_DAC_State[k] = ADSR_Attack;
-        break;
-
-      case ADSR_Attack:
-
-        ADSR_currentsample[k] = long(micros()*inv_sample_adsr_inc_micros[k*2] + 0.5) - ADSR_basesample[k];
-
-        if(ADSR_currentsample[k] >= ADSR_nb_samples[k])
-        {
-          Set_DAC(4095,4);
-          ADSR_DAC_State[k] = ADSR_DecayInit;
-          break;
-        }
-        if(ADSR_currentsample[k] != ADSR_prevsample[k])
-        {
-          Set_DAC(int(4095*ADSR_currentsample[k]/ADSR_nb_samples[k] +0.5),4);
-          ADSR_prevsample[k] = ADSR_currentsample[k];    
-          break;
-        }
-
-      case ADSR_DecayInit:
-        
-        ADSR_basesample[k] = long(micros()*inv_sample_adsr_inc_micros[k*2 + 1] + 0.5);
-        ADSR_prevsample[k] = 0;
-        ADSR_DAC_State[k] = ADSR_Decay;
-        break;
-
-      case ADSR_Decay:
-
-        ADSR_currentsample[k] = long(micros()*inv_sample_adsr_inc_micros[k*2 + 1] + 0.5) - ADSR_basesample[k];
-        if(ADSR_currentsample[k] >= ADSR_nb_samples[k])
-        {
-          Set_DAC(int(ADSR_Sustain_Level[k]/255 + 0.5)*4095,4);
-          ADSR_DAC_State[k] = ADSR_Sustain;
-          ADSR_basesample[k] = 0;
-          ADSR_prevsample[k] = 0;
-          break;
-        }
-        if(ADSR_currentsample[k] != ADSR_prevsample[k])
-        {
-          Set_DAC(int(4095*ADSR_currentsample[k]/ADSR_nb_samples[k] +0.5),4);
-          ADSR_prevsample[k] = ADSR_currentsample[k];    
-          break;
-        }
-      case ADSR_ReleaseInit:
-        ADSR_basesample[k] = long(micros()*inv_sample_adsr_inc_micros[k*2 +2] + 0.5);
-        ADSR_prevsample[k] = 0;
-        ADSR_DAC_State[0] = ADSR_Release;
-        break;
-
-      case ADSR_Release:
-        ADSR_currentsample[k] = long(micros()*inv_sample_adsr_inc_micros[k*2 + 2] + 0.5);
-        if(ADSR_currentsample[k] >= ADSR_nb_samples[k])
-        {
-          Set_DAC(0,4);
-          ADSR_DAC_State[k] = ADSR_Off;
-          break;
-        }
-        if(ADSR_currentsample[k] != ADSR_prevsample[k])
-        {
-          Set_DAC(int(4095*(ADSR_Sustain_Level[k]/255)*ADSR_currentsample[k]/ADSR_nb_samples[k] +0.5),4);
-          ADSR_prevsample[k] = ADSR_currentsample[k];
-          break;
-        }
-    } // end switch ADSR_states
-  } // end ADSR loop
-*/      
- 
+      if (Gate_basesample == 0) {Gate_basesample = long(micros());}
+      Gate_currentsample = long(micros()) - Gate_basesample;
+      if (inv_gate_period_micros == 0.0) { inv_gate_period_micros = (1.0/(2.0*notes_freq[0]))*1E6;}
+      
+      if (Gate_currentsample > (inv_gate_period_micros/2))
+      {
+        Set_DAC(Gate_Level*4095,5);
+        Gate_Level = !Gate_Level;
+        Gate_basesample = long(micros());
+      }
+    }
   
-  if (PWMActive)
-  {
-   // PWM mode free running. (do not update DAC state needlessly)
-   // to do : LFO 'handlenoteon' trigger mode.
-   //currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
-   currentsample = long(micros()*inv_sample_inc_micros + 0.5);
-   if(currentsample != prevsample)
-   {
-     
-      Set_DAC(DAC_table[0][currentsample % 360],0);
-      Set_DAC(DAC_table[1][currentsample % 360],1);
-      Set_DAC(DAC_table[2][currentsample % 360],2);
-      Set_DAC(DAC_table[3][currentsample % 360],3);
-   
-   }
+    if (!Gate_DAC)
+    { 
+      for (k=1;k<2;k++)
+      {
+        tmp_ADSR_DAC_State = ADSR_DAC_State[k];
+        switch(tmp_ADSR_DAC_State)
+        {
+          case ADSR_Disabled:
+            DebugPrint("\nADSR_DISABLED",double(k),2);
+            break;
 
-   prevsample = currentsample;
-  }
+
+          case ADSR_Sustain:
+            DebugPrint("\nADSR_SUST",double(k),2);
+            if (ADSR_looped)
+            {
+              DebugPrint("\nADSR_LOOPED",double(k),2);
+              ADSR_currentsample[k] = long(micros()*inv_sample_adsr_inc_micros[k*4 + 3] + 0.5) - ADSR_basesample[k];
+              DebugPrint("\nADSR_LOOPED_CUR_SAMPLE",double(ADSR_currentsample[k]),3);
+              
+              if(ADSR_currentsample[k] >= ADSR_nb_samples[k])
+              {
+                ADSR_DAC_State[k] = ADSR_ReleaseInit;
+                DebugPrint("\nADSR_SUST_LOOP_END",double(ADSR_currentsample[k]),3);
+              }
+            }
+            break;
+
+          case ADSR_Off:
+            DebugPrint("\nADSR_OFF",double(k),2);
+            break;
+
+          case ADSR_Disable:
+            DebugPrint("\nADSR_TO_DISABLE",double(k),2);
+            Set_DAC(4095,4 + k);
+            ADSR_DAC_State[k] = ADSR_Disabled;
+            break;
+
+          case ADSR_AttackInit:
+            DebugPrint("\nADSR_ATTACKINIT",double(k),2);
+            Set_DAC(0,4 + k);
+            ADSR_basesample[k] = long(micros()*inv_sample_adsr_inc_micros[k*4] + 0.5);
+            ADSR_prevsample[k] = 0;
+            ADSR_DAC_State[k] = ADSR_Attack;
+            break;
+
+          case ADSR_Attack:
+            DebugPrint("\nADSR_ATTACK",double(k),2);
+            ADSR_currentsample[k] = long(micros()*inv_sample_adsr_inc_micros[k*4] + 0.5) - ADSR_basesample[k];
+            DebugPrint("\nADSR_ATTACK_CUR_SAMPLE",double(ADSR_currentsample[k]),3);
+            DebugPrint("\nADSR_NB_SAMPLES",double(ADSR_nb_samples[k]),3);
+            if(ADSR_currentsample[k] >= ADSR_nb_samples[k])
+            {
+              Set_DAC(4095,4 +k);
+              ADSR_DAC_State[k] = ADSR_DecayInit;
+              DebugPrint("\nADSR_ATTACK_CUR_SAMPLE_OVF",double(ADSR_currentsample[k]),3);
+            }
+            if(ADSR_currentsample[k] != ADSR_prevsample[k])
+            {
+              Set_DAC(int(4095*ADSR_currentsample[k]/ADSR_nb_samples[k] +0.5),4+k);
+              ADSR_prevsample[k] = ADSR_currentsample[k];    
+            }
+            break;
+
+          case ADSR_DecayInit:
+            DebugPrint("\nADSR_DECAYINIT",double(k),2);
+            ADSR_basesample[k] = long(micros()*inv_sample_adsr_inc_micros[k*4 + 1] + 0.5);
+            ADSR_prevsample[k] = 0;
+            ADSR_DAC_State[k] = ADSR_Decay;
+            break;
+
+          case ADSR_Decay:
+            DebugPrint("\nADSR_DECAY",double(k),2);
+            ADSR_currentsample[k] = long(micros()*inv_sample_adsr_inc_micros[k*4 + 1] + 0.5) - ADSR_basesample[k];
+            DebugPrint("\nADSR_DECAY_CUR_SAMPLE",double(ADSR_currentsample[k]),3);
+            if(ADSR_currentsample[k] >= ADSR_nb_samples[k])
+            {
+              Set_DAC(int(ADSR_Sustain_Level[k]/255 + 0.5)*4095,4+k);
+              DebugPrint("\nADSR_DECAY_CUR_SAMPLE_OVF",double(ADSR_currentsample[k]),3);
+              ADSR_DAC_State[k] = ADSR_Sustain;
+              ADSR_basesample[k] = long(micros()*inv_sample_adsr_inc_micros[k*4 +3] + 0.5);
+              ADSR_prevsample[k] = 0;
+            }
+            if(ADSR_currentsample[k] != ADSR_prevsample[k])
+            {
+              Set_DAC(int(4095*ADSR_currentsample[k]/ADSR_nb_samples[k] +0.5),4+k);
+              ADSR_prevsample[k] = ADSR_currentsample[k];    
+            }
+            break;
+
+          case ADSR_ReleaseInit:
+            DebugPrint("\nADSR_RELEASEINIT",double(k),2); 
+            ADSR_basesample[k] = long(micros()*inv_sample_adsr_inc_micros[k*4 +2] + 0.5);
+            ADSR_prevsample[k] = 0;
+            ADSR_DAC_State[k] = ADSR_Release;
+            break;
+
+          case ADSR_Release:
+            DebugPrint("\nADSR_RELEASE",double(k),2);
+            ADSR_currentsample[k] = long(micros()*inv_sample_adsr_inc_micros[k*4 + 2] + 0.5) - ADSR_basesample[k];
+            DebugPrint("\nADSR_RELEASE_CUR_SAMPLE",double(ADSR_currentsample[k]),3);
+            if(ADSR_currentsample[k] >= ADSR_nb_samples[k])
+            {
+              DebugPrint("\nADSR_RELEASE_CUR_SAMPLE_OVF",double(ADSR_currentsample[k]),3);
+              Set_DAC(0,4);
+              if (!ADSR_looped) 
+              {
+                ADSR_DAC_State[k] = ADSR_Off;
+                DebugPrint("\nADSR_OFF",double(k),3);
+              }
+              else 
+              {
+                ADSR_DAC_State[k] = ADSR_AttackInit;
+                DebugPrint("\nADSR_LOOP_RESET_TO_ATK",double(k),3);
+              } // loop enveloppe
+            }
+            if(ADSR_currentsample[k] != ADSR_prevsample[k])
+            {
+              Set_DAC(int(4095*(ADSR_Sustain_Level[k]/255)*ADSR_currentsample[k]/ADSR_nb_samples[k] +0.5),4 +k);
+              ADSR_prevsample[k] = ADSR_currentsample[k];
+            }
+            break;
+        } // end switch ADSR_states
+      } // end ADSR loop
+    } // end if !Gate_DAC
+      
+    if (PWMActive)
+    {
+    // PWM mode free running. (do not update DAC state needlessly)
+    // to do : LFO 'handlenoteon' trigger mode.
+    //currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
+    currentsample = long(micros()*inv_sample_inc_micros + 0.5);
+    if(currentsample != prevsample)
+    {
+      
+        Set_DAC(DAC_table[0][currentsample % 360],0);
+        Set_DAC(DAC_table[1][currentsample % 360],1);
+        Set_DAC(DAC_table[2][currentsample % 360],2);
+        Set_DAC(DAC_table[3][currentsample % 360],3);
+    
+    }
+
+    prevsample = currentsample;
+    }
+  } // end if midimode
 
   if (!midimode)
   {
@@ -4117,8 +4188,8 @@ void loop() {
 
       if (!(strcmp(receivedChars, "gendactable")))
       {
-        static uint8_t notestart = 24;
-        static uint8_t noteend = 25;
+        static uint8_t notestart = 20;
+        static uint8_t noteend = 21;
         static char charfreq[8];
         static char printcharfreq[10];
         uint32_t addr;
@@ -4132,21 +4203,26 @@ void loop() {
           dtostrf(notefreq, 6, 2, charfreq);
           sprintf(printcharfreq,"<F%s>", charfreq);
           SerialUSB.print(printcharfreq);
-          Serial.flush();
+          SerialUSB.flush();
 
           MaxVcoPots(pots,midi_to_pot,0);
           MaxVcoPots(pots,midi_to_pot,1);
           MaxVcoPots(pots,midi_to_pot,2);
           MaxVcoPots(pots,midi_to_pot,3);
+          PrintDigiPot(midi_to_pot,0,1);
+          PrintDigiPot(midi_to_pot,1,1);
+          PrintDigiPot(midi_to_pot,2,1);
+          PrintDigiPot(midi_to_pot,3,1);
+           
           DebugPrintStr("POTS MAXED",2);
           delay(10000);
-          flash.eraseSection(16384,4096);
-          Generate_dV_to_dHz_Table(midi_to_pot,notefreq,0);
-          flash.eraseSection(20480,4096);
-          Generate_dV_to_dHz_Table(midi_to_pot,notefreq,1);
-          flash.eraseSection(24576,4096);
+          //flash.eraseSection(16384,4096);
+          //Generate_dV_to_dHz_Table(midi_to_pot,notefreq,0);
+          //flash.eraseSection(20480,4096);
+          //Generate_dV_to_dHz_Table(midi_to_pot,notefreq,1);
+          //flash.eraseSection(24576,4096);
           Generate_dV_to_dHz_Table(midi_to_pot,notefreq,2);
-          flash.eraseSection(28672,4096);
+          //flash.eraseSection(28672,4096);
           Generate_dV_to_dHz_Table(midi_to_pot,notefreq,3);
           
         }
@@ -4182,7 +4258,7 @@ void loop() {
         dtostrf(notefreq, 6, 2, charfreq);
         sprintf(printcharfreq,"<F%s>", charfreq);
         SerialUSB.print(printcharfreq);
-        Serial.flush();
+        SerialUSB.flush();
           
 
         GenerateArbitraryFreqDAC(midi_to_pot,notefreq, duty, f1, f2, int(subvco/2)); // 0 is for VCO 0, not subvco
@@ -4193,7 +4269,7 @@ void loop() {
         SerialUSB.print("<Generated_f2=");
         SerialUSB.print(String(f2,3));
         SerialUSB.print(">");
-        Serial.flush();
+        SerialUSB.flush();
         
 
         //digitalWrite(vco_pin,0);
@@ -4207,14 +4283,14 @@ void loop() {
         //SerialUSB.println("freq_case1");
         //Serial.flush();
           
-          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,int(subvco/2)*2,0);
+          //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,int(subvco/2)*2,0);
           //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,int(subvco/2)*2 + 1,1);
+          //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,int(subvco/2)*2 + 1,1);
           tuneend = millis() - tunestart;
           SerialUSB.print("<TUNETIME=");
           SerialUSB.print(tuneend);
           SerialUSB.print(">");
-          Serial.flush();
+          SerialUSB.flush();
           // TO DO : manage both OSCs
           CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,int(subvco/2));
           //CountFrequencyDeltaGlobal(50,notefreq,f_err);
@@ -4224,14 +4300,14 @@ void loop() {
         //SerialUSB.println("freq_case2");
         //Serial.flush();
         
-          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,int(subvco/2)*2 + 1,0);
+          //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,int(subvco/2)*2 + 1,0);
           //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,int(subvco/2)*2,1);
+          //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,int(subvco/2)*2,1);
           tuneend = millis() - tunestart;
           SerialUSB.print("<TUNETIME=");
           SerialUSB.print(tuneend);
           SerialUSB.print(">");
-          Serial.flush();
+          SerialUSB.flush();
           CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,int(subvco/2));
         }
         // end check if that section is still required.
@@ -4241,14 +4317,14 @@ void loop() {
           //Serial.flush();
         
           /// last three params : level, subvco, global tune
-          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,int(subvco/2)*2 + 1,0);
+          //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,int(subvco/2)*2 + 1,0);
           //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,int(subvco/2)*2,1);
+          //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,int(subvco/2)*2,1);
           tuneend = millis() - tunestart;
           SerialUSB.print("<TUNETIME=");
           SerialUSB.print(tuneend);
           SerialUSB.print(">");
-          Serial.flush();
+          SerialUSB.flush();
           CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,int(subvco/2));
     
 
@@ -4258,14 +4334,14 @@ void loop() {
           //SerialUSB.println("freq_case4");
           //Serial.flush();
         
-          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,int(subvco/2)*2,0);
+          //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f1,1,int(subvco/2)*2,0);
           //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-          NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,int(subvco/2)*2 + 1,1);
+          //NewAutoTuneDAC(pots,midi_to_pot,notestart,notefreq,duty,f2,0,int(subvco/2)*2 + 1,1);
           tuneend = millis() - tunestart;
           SerialUSB.print("<TUNETIME=");
           SerialUSB.print(tuneend);
           SerialUSB.print(">");
-          Serial.flush();
+          SerialUSB.flush();
           CountFrequencyDelta2(10,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err,int(subvco/2));
           //CountFrequencyDeltaGlobal(50,notefreq,f_err);
         }
@@ -4275,7 +4351,7 @@ void loop() {
         SerialUSB.print(">");
         SerialUSB.println("");
         SerialUSB.println("");
-        Serial.flush();
+        SerialUSB.flush();
       }
     } // end check notes formula DAC
    
@@ -4471,7 +4547,7 @@ void loop() {
           pot8.decrease(1);
           (midi_to_pot[8])--;
           //intp5--;
-          PrintDigiPot(midi_to_pot,1,2); 
+          PrintDigiPot(midi_to_pot,2,2); 
         }
 
         if (!(strcmp(receivedChars , "t"))) 
