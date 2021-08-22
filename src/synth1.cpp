@@ -41,10 +41,23 @@ MCP4728 MCPdac;
 double DAC_gain[4];
 double DAC_cor[4];
 
+double DAC_gain_adaptive[4][50];
+// DAC_gain_corrected for LFO corrections for each note first index : noteindex, second index, subvco for each gain corrected, last position = tuned
+double DAC_gain_corrected_lfo[49][4];
+// DACoffset for LFO corrections for each note first index : noteindex, second index, subvco for each offset, last position = tuned
+int16_t DACoffset[49][4];
+  
+
+// store the targets for PWM. first index is subvco, second index is min and max frequency targets in that order.
+double LFO_MinMax_Freq_Targets[4][2];
+// store the frequency deltas by components for PWM. first index is subvco, second index is min and max frequency targets in that order.
+double LFO_Delta_Freq_Targets[4][2];
+
+
 
 MIDI_CREATE_INSTANCE(HardwareSerial,Serial,MIDI);
 
-byte DebugLevel = 0;
+byte DebugLevel = 2;
 
 // Digi Pot constructors : (object constructor patched for MCP23017 support)
 /*
@@ -114,7 +127,8 @@ DigiPot *allpots[16] = { &pot0 , &pot1, &pot2, &pot3, &pot4, &pot5, &pot6 , &pot
 double coarse_freq[4][200]; 
 
 // to do : export to FLASH
-int16_t sin_table[90]; // one degree resolution sin_table holding [0, Pi/2] interval
+int16_t sin_table[360]; // one degree resolution sin_table holding [0, 2*Pi] interval
+int16_t cos_table[360]; // one degree resolution sin_table holding [0, 2*Pi] interval
 
 uint16_t DAC_table[4][360]; // full period DAC_table for both suboscs
 
@@ -138,6 +152,14 @@ float inv_gate_period_micros = 0.0;
 // semitone shift of OSC2
 int16_t osc2noteshift;
 int8_t cents_detune[2] = {0,0};
+
+// global variables used by LFO and handlenoteon
+double duty[2] = {0.44,0.44};
+double LFOFreq[2] = {0.2,0.2};
+double PWMDepth[2] = {0.05,0.05};
+double notefreqs[2];
+uint8_t noteindexes[2];
+static uint8_t totalerrorsamples[2] = {0,0};
 
 // VCA attack/decay
 int16_t attack;
@@ -248,7 +270,7 @@ int freqrefpin;
 uint8_t gatepin = 7;
 uint8_t hspin = 8;
 
-double notefreq;
+
 //double minfreq = 130.8;
 double minfreq = 90.0;
 double maxfreq = 2093.0;
@@ -324,6 +346,30 @@ void MaxVcoPots(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte subvco) {
     }
     
   }
+
+void PrintDACGainAdaptive(byte msgdebuglevel)
+{
+
+  uint8_t m;
+  uint8_t i;
+  if (msgdebuglevel <= DebugLevel)
+  {
+    for (m=0;m < 4;m++)
+    {
+      SerialUSB.print("SUBVCO: ");
+      SerialUSB.print(m);
+      SerialUSB.print("\n");
+
+      for (i=0;i< 50;i++)
+      {
+        SerialUSB.print(DAC_gain_adaptive[m][i]);
+        SerialUSB.print("\n");
+        SerialUSB.flush();
+      }
+    }
+  }   
+}
+
 
 void PrintDigiPot(byte (&curr_pot_vals)[12], byte subvco, byte msgdebuglevel)
 {
@@ -499,6 +545,7 @@ uint16_t d_freq_to_DAC_steps(double delta_freq, double prev_delta_freq, uint8_t 
 int16_t DAC_steps;
 double DAC_steps_temp;
 double DAC_gain_corrected;
+static uint8_t adaptive_index = 0;
 
 if ((delta_freq != prev_delta_freq) && (adaptive))
 {
@@ -506,7 +553,13 @@ if ((delta_freq != prev_delta_freq) && (adaptive))
   DebugPrint("dac_gain_corrected_subvco", double(subvco),4);
   DebugPrint("dac_gain_corrected_val", DAC_gain_corrected,4);
   DAC_steps_temp = delta_freq * -DAC_gain_corrected;
-  DAC_gain[subvco] = DAC_gain_corrected;
+  //DAC_gain[subvco] = DAC_gain_corrected;
+  
+  // store the DAC_gain_corrected values to check for fluctuations (should have none if tuning is linearly dependent
+  // on the DAC, whatever tuning frequency it is)
+  
+  DAC_gain_adaptive[subvco][adaptive_index] = DAC_gain_corrected;
+  adaptive_index++;
 
 }
 else
@@ -629,9 +682,9 @@ void InitSinTableOptimized(float LFOFreq, int16_t SinTable[], uint16_t nb_sample
   float inv_nb_sample;
 
   //these intervals are initialized there and used for DAC update based on LFO frequency
-  sample_inc = 1.0/(LFOFreq*4.0*float(nb_samples)); // sample time increment in sec
+  sample_inc = 2.0/(LFOFreq*1.0*float(nb_samples)); // sample time increment in sec
   // calculate inverse of time interval. multiplication by inverse is way faster.
-  inv_sample_inc_micros = LFOFreq*4.0*float(nb_samples)/1E6; // in 1/µsec
+  inv_sample_inc_micros = LFOFreq*0.5*float(nb_samples)/1E6; // in 1/µsec
   
   // calculate inverse one time only. multiplication by inverse is way faster.
 
@@ -639,13 +692,43 @@ void InitSinTableOptimized(float LFOFreq, int16_t SinTable[], uint16_t nb_sample
   for (sample = 0; sample < nb_samples; sample++)
   {
         
-    temp_sin = sin(0.5*PI*sample*inv_nb_sample);
+    temp_sin = sin(2*PI*sample*inv_nb_sample);
     // side effect of [0, Pi/2] only calculation is slight positive bias due to half step rounding.
     sin_table[sample] = (int(32767.0*temp_sin + 0.5));
     
   }
 
 }
+
+void InitCosTableOptimized(float LFOFreq, int16_t CosTable[], uint16_t nb_samples)
+{
+  //compute SinTable on [0, Pi/2] interval, remaining interval [Pi/2 to 2*Pi] is obtained simply from 
+  // [0, Pi/2]
+  // nb_samples resolution to use for [0,Pi/2] for a resolution of 1 degree = nb_samples = 90
+
+  uint16_t sample;
+  float temp_cos;
+  float inv_nb_sample;
+
+  //these intervals are initialized there and used for DAC update based on LFO frequency
+  sample_inc = 2.0/(LFOFreq*1.0*float(nb_samples)); // sample time increment in sec
+  // calculate inverse of time interval. multiplication by inverse is way faster.
+  inv_sample_inc_micros = LFOFreq*0.5*float(nb_samples)/1E6; // in 1/µsec
+  
+  // calculate inverse one time only. multiplication by inverse is way faster.
+
+  inv_nb_sample = 1.0/float(nb_samples);
+  for (sample = 0; sample < nb_samples; sample++)
+  {
+        
+    temp_cos = cos(2*PI*sample*inv_nb_sample);
+    // side effect of [0, Pi/2] only calculation is slight positive bias due to half step rounding.
+    cos_table[sample] = (int(32767.0*temp_cos + 0.5));
+    
+  }
+
+}
+
 
 void InitSinTable(float LFOFreq, int16_t SinTable[], uint16_t nb_samples)
 {
@@ -678,13 +761,24 @@ void InitSinTable(float LFOFreq, int16_t SinTable[], uint16_t nb_samples)
 
 }
 
-void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, float notefreq, uint8_t vco, bool order) 
+
+// TO DO : make calculations of offsets external and pass offset[2]
+void Enable_PWM_Mod_by_LFO(uint8_t Action, double &PWMDepth, double DutyCenterVal, double LFOFreq, float notefreq, uint8_t vco, bool order) 
 {
-  //enables PWM for the oscillator by managing frequency of both subosc through DAC
-  //We have to check that DutyDepth is not out of bounds of DAC range according to the noteoffset.
+  //enables PWM for the oscillator by managing frequency of both timing lines through two DAC
+  //We have to check that DutyDepth is not out of bounds of DAC range, taking into account the DACs offsets
+  //used for fine frequency tuning
+  // Action : 0x1 : backup initial DAC_states ( when called inside handlenoteon usually)
+  // Action : 0x2 : restore DAC_states (on subsequent calls for LFO retuning)
+  // Action : 0x4 : generate re-offseted DACtables (offset calculated in loop() and stored globally)
+  // Action : 0x8 : generate gaincorrected DACtables (gain correction calculated in loop() and stored globally)
 
   float DACdtmp;
+  float dfreq;
   int16_t DACd;
+  uint8_t i;
+  static uint16_t DAC_states_backup[4] = {0,0,0,0};
+  //static bool firstcall = true;
   float dVmax[2];
   float PWMDepthMax[2];
   float PWMDepthMaxPossible;
@@ -693,11 +787,39 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
   static float CurLFOFreq = 0;
   uint16_t sample;
   div_t divresult;
+
+  if (Action & 0x1)
+  {
+    for (i=0;i<4;i++)
+    {
+      DAC_states_backup[i] = DAC_states[i];
+    }
+  }
+
+  if (Action & 0x2)
+  {
+    for (i=0;i<4;i++)
+    {
+      DAC_states[i] = DAC_states_backup[i];
+    }
+  }
+
+  if (Action & 0x4)
+  {
+      
+  //DebugPrint("f_offset[0]",f_offset[0],1);
+  //DebugPrint("f_offset[1]",f_offset[1],1);
   
+  DebugPrint("DACoffset[0]",DACoffset[noteindexes[vco]][!order],1);
+  DebugPrint("DACoffset[1]",DACoffset[noteindexes[vco]][order],1);
+  }
+
   if (LFOFreq != CurLFOFreq) 
   {
     CurLFOFreq = LFOFreq;
-    InitSinTableOptimized(LFOFreq,sin_table,90);
+    InitSinTableOptimized(LFOFreq,sin_table,360);
+    InitCosTableOptimized(LFOFreq,cos_table,360);
+    
   }
 
   //vco_freq[0] = notefreq/2*DutyCenterVal;
@@ -718,7 +840,8 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
   
   
   //min_dVmax = min(dVmax[0],dVmax[1]);
-
+  // we calculate the max PWM Depth so as not to clip the DAC and the wavetable, if the requested
+  // PWMDdepth is unattainable, we will provide the Max PWMDepth possible.
   PWMDepthMax[0] = (2*DutyCenterVal*dVmax[0])/(2*dVmax[0] + 3.0*33000*0.0665E-6*notefreq/DutyCenterVal);
   PWMDepthMax[1] = (2*DutyCenterValCmp*dVmax[1])/(2*dVmax[1] + 3.0*33000*0.0665E-6*notefreq/DutyCenterValCmp);
   DebugPrint("PWMDepthMax[0]",PWMDepthMax[0],3);
@@ -753,13 +876,86 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
 // compute and initialize dac_tables (both subosc) for a full period, using the sintable for [0, Pi/2]
  for (sample = 0; sample < 360; sample++)
   {
+
+      dfreq = notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[sample]/32767.0)) -1.0/(2.0*DutyCenterVal));
+      
+      if (Action & 0x8) {DACdtmp = -DAC_gain_corrected_lfo[noteindexes[vco]][!order]*dfreq;}
+      else {DACdtmp = -DAC_gain[vco*2 +!order]*dfreq;}
+      
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      // if clipping happen nonetheless, we soft clip the DAC values.
+      if (Action & 0x4) 
+      {
+        DAC_table[vco*2 + !order][sample] = constrain(DACd + DAC_states[vco*2 + !order] + abs(sin_table[sample]/32767.0)*DACoffset[noteindexes[vco]][!order],0,4095);
+      }
+      else
+      {
+        DAC_table[vco*2 + !order][sample] = constrain(DACd + DAC_states[vco*2 + !order],0,4095);
+      }
+      
+      
+      if ((DAC_table[vco*2 + !order][sample] == 0) || (DAC_table[vco*2 + !order][sample] == 4095))
+      {
+        DebugPrintStr("LFO DAC CLIP!\n",3);
+      }
+      
+      if (sample == 89)
+      {
+        LFO_MinMax_Freq_Targets[vco*2 + !order][0] = notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[sample]/32767.0)));
+        LFO_Delta_Freq_Targets[vco*2 + !order][0] = dfreq;
+      
+      }
+      else if (sample == 269)
+      {
+        LFO_MinMax_Freq_Targets[vco*2 + !order][1] = notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[sample]/32767.0)));
+        LFO_Delta_Freq_Targets[vco*2 + !order][1] = dfreq;
+      }
+      
+      // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
+      // are always equal to 1/f_note in PWM)
+      dfreq = notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[sample]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
+      
+      if (Action & 0x8) {DACdtmp = -DAC_gain_corrected_lfo[noteindexes[vco]][order]*dfreq;}
+      else {DACdtmp = -DAC_gain[vco*2 + order]*dfreq;}
+
+      DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
+      if (Action & 0x4) 
+      {
+        DAC_table[vco*2 +order][sample] = constrain(DACd + DAC_states[vco*2 +order] + abs(sin_table[sample]/32767.0)*DACoffset[noteindexes[vco]][order],0,4095);
+      }
+      else
+      {
+        DAC_table[vco*2 +order][sample] = constrain(DACd + DAC_states[vco*2 +order],0,4095);
+      }
+      
+      if ((DAC_table[vco*2 + order][sample] == 0) || (DAC_table[vco*2 + order][sample] == 4095))
+      {
+        DebugPrintStr("LFO DAC CLIP!\n",3);
+      }
+      
+    
+      if (sample == 89)
+      {
+        LFO_MinMax_Freq_Targets[vco*2 + order][0] = notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[sample]/32767.0)));
+        LFO_Delta_Freq_Targets[vco*2 + order][0] = dfreq;
+     
+      }
+      else if (sample == 269)
+      {
+        LFO_MinMax_Freq_Targets[vco*2 + order][1] = notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[sample]/32767.0)));
+        LFO_Delta_Freq_Targets[vco*2 + order][1] = dfreq;
+     
+      }
+      
   
-    divresult = div(sample,90);
-    switch (divresult.quot)
+    //divresult = div(sample,90);
+    //switch (divresult.quot)
+    //switch(3)
+    /*
     {
     case 0:
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
-      DACdtmp = -DAC_gain[vco*2 +!order]*DutyCenterVal*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal))- DAC_cor[vco*2 + !order];
+      DACdtmp = -DAC_gain[vco*2 +!order]*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 + !order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2]),0,4095);
       DAC_table[vco*2 + !order][sample] = constrain(DACd + DAC_states[vco*2 + !order],0,4095);
@@ -767,7 +963,7 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
-      DACdtmp = -DAC_gain[vco*2 + order]*DutyCenterValCmp*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp)) - DAC_cor[vco*2 + order];
+      DACdtmp = -DAC_gain[vco*2 + order]*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2 +1]),0,4095);
       DAC_table[vco*2 +order][sample] = constrain(DACd + DAC_states[vco*2 +order],0,4095);
@@ -776,7 +972,7 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
     
     case 1:
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
-      DACdtmp = -DAC_gain[vco*2 + !order]*DutyCenterVal*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 + !order];
+      DACdtmp = -DAC_gain[vco*2 + !order]*notefreq*(1.0/(2.0*(DutyCenterVal + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 + !order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2]),0,4095);
       DAC_table[vco*2 + !order][sample] = constrain(DACd + DAC_states[vco*2 + !order],0,4095);
@@ -784,7 +980,7 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
-      DACdtmp = -DAC_gain[vco*2 + order]*DutyCenterValCmp*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
+      DACdtmp = -DAC_gain[vco*2 + order]*notefreq*(1.0/(2.0*(DutyCenterValCmp - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2 +1]),0,4095);
       DAC_table[vco*2 + order][sample] = constrain(DACd + DAC_states[vco*2 + order],0,4095);
@@ -794,7 +990,7 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
     case 2:
 
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
-      DACdtmp = -DAC_gain[vco*2 + !order]*DutyCenterVal*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 + !order];
+      DACdtmp = -DAC_gain[vco*2 + !order]*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 + !order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2]),0,4095);
       DAC_table[vco*2 + !order][sample] = constrain(DACd + DAC_states[vco*2 +!order],0,4095);
@@ -802,7 +998,7 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
-      DACdtmp = -DAC_gain[vco*2 + order]*DutyCenterValCmp*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
+      DACdtmp = -DAC_gain[vco*2 + order]*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2 +1]),0,4095);
       DAC_table[vco*2 + order][sample] = constrain(DACd + DAC_states[vco*2 + order],0,4095);
@@ -812,24 +1008,26 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
     case 3:
 
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));
-      DACdtmp = -DAC_gain[vco*2 + !order]*DutyCenterVal*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 +!order];
+      DACdtmp = -DAC_gain[vco*2 + !order]*notefreq*(1.0/(2.0*(DutyCenterVal - PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterVal));// - DAC_cor[vco*2 +!order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[0][sample] = constrain(int(corfac*Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2]),0,4095);
-      DAC_table[vco *2 + !order][sample] = constrain(DACd + DAC_states[vco*2 +!order],0,4095);
+      DAC_table[vco*2 + !order][sample] = constrain(DACd + DAC_states[vco*2 +!order],0,4095);
       
       // the next suboscillator has 180° phase shift to the first (The sum of subosc periods
       // are always equal to 1/f_note in PWM)
       //Vd = 3.0*33000*0.0665E-6*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));
-      DACdtmp = -DAC_gain[vco*2 + order]*DutyCenterValCmp*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
+      DACdtmp = -DAC_gain[vco*2 + order]*notefreq*(1.0/(2.0*(DutyCenterValCmp + PWMDepth*sin_table[89 - divresult.rem]/32767.0)) -1.0/(2.0*DutyCenterValCmp));// - DAC_cor[vco*2 + order];
       DACd = (DACdtmp > 0)?(int(DACdtmp +0.5)):(int(DACdtmp - 0.5));
       //DAC_table[1][sample] = constrain(int(Vd*4095.0/3.0 + 0.5 + DAC_states[vco*2 +1]),0,4095);
       DAC_table[vco*2 + order][sample] = constrain(DACd + DAC_states[vco*2 + order],0,4095);
    
       break;
     }
+    */
 
   }
 
+  //firstcall = false;
   PWMActive = true;
   //timer2.setup();
 
@@ -837,9 +1035,7 @@ void Enable_PWM_Mod_by_LFO(float &PWMDepth, float DutyCenterVal, float LFOFreq, 
 
 void Disable_PWM_Mod_by_LFO(uint8_t vco)
 {
-  Set_DAC(DAC_states[vco*2],0);
-  Set_DAC(DAC_states[vco*2 +1],1);
-  //timer2.unsetup();
+  PWMActive = false;
 }
 
 
@@ -2256,8 +2452,8 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
   // Tune both osc at the same time based on fhigh_meas_err and flow_meas_err
   // tune both osc at the same time based on f_total_err, using duty cycle as weighting for the period error.
   // adaptive : use adaptive correction of DAC frequency to step gain between iterations.
-  bool adaptive = false;
-  uint16_t stabilization_delay = 5; //(ms)
+  bool adaptive = true;
+  uint16_t stabilization_delay = 10; //(ms)
   byte max_pot = 6;
   double f_meas = 0.0;
   double fhigh_meas = 0.0;
@@ -2269,7 +2465,7 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
   uint8_t max_tunesteps = 10;
   float f_err_history[2][max_tunesteps];
   float dev_cents_history[2][max_tunesteps];
- 
+  uint8_t tuned_at_step[2] = {0,0};
   double dutycor = duty;
   double dev_cents[2] = {0.0,0.0};
   const double tune_thresh = 2.5;
@@ -2367,6 +2563,7 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
     if ((fabs(dev_cents[0]) <= tune_thresh) && (!tuned[0])) 
     { 
       tuned[0] = true;
+      tuned_at_step[0] = p;
       DebugPrint("THR_ATT",double(fabs(dev_cents[0])),2);
       DebugPrintToken("\n",2);
     } //end tune thresh att
@@ -2374,6 +2571,7 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
     if ((fabs(dev_cents[1]) <= tune_thresh) && (!tuned[1])) 
     { 
       tuned[1] = true;
+      tuned_at_step[1] = p;
       DebugPrint("THR_ATT",double(fabs(dev_cents[1])),2);
       DebugPrintToken("\n",2);
     } //end tune thresh att
@@ -2387,17 +2585,18 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
 
   for (m=0;m<2;m++)
   {
-    DebugPrint("VCO:",double(m),1);
+    DebugPrint("VCO:",double(vco*2 + m),1);
     DebugPrintToken("\n",1);
-    for (p=0;p<max_tunesteps;p++) 
+    for (p=0;p<=tuned_at_step[m];p++) 
     {
       DebugPrint( "\n", dev_cents_history[m][p],1);
-      if (dev_cents_history[m][p] == 0.0) {break;}
       
     }
   
-  }
+    tuned_at_step[m] = 0;
 
+  }
+ 
   for(m = vco*max_pot; m < vco*max_pot + max_pot; m ++)
   {
     PWM_Note_Settings[noteindex][m] = curr_pot_vals[m];
@@ -2410,6 +2609,328 @@ void NewAutoTuneDAC2(DigiPot *ptr[12], byte (&curr_pot_vals)[12], byte noteindex
   
 
 } // end NewAutotuneDAC2
+
+void handleNoteOn(byte channel, byte pitch, byte velocity)
+{
+  double f1 = 0.0;
+  double f2 = 0.0;
+  double f_meas = 0.0;
+  double f1_meas = 0.0;
+  double f2_meas = 0.0;
+  double f_err = 0.0;
+
+  bool order[2] = {0,0};
+  double real_duty[2] = {0.0,0.0};
+  double osc2notefreq;
+  uint8_t i;
+  uint8_t midi_to_pot_G[12];
+
+  //MIDI.sendNoteOn(40, 127, 1);
+  //osc2noteshift = 0;
+
+  // restrict OSC to notes of possible frequency range
+  if (pitch < 48) {
+    noteindexes[0] = 0;
+    }
+  else if (pitch > 96) {
+    noteindexes[0] = 48;
+  }
+  else {
+    noteindexes[0] = pitch - 48;
+  }
+
+  noteindexes[1] = noteindexes[0] + osc2noteshift;
+  noteindexes[1] = constrain(noteindexes[1],0,48);
+  if (noteindexes[0] != (noteindexes[1] - osc2noteshift)) { noteindexes[1] = noteindexes[0];}
+
+  //MIDI.sendNoteOn(41, 127, 1);
+   
+  if (InTuning)  {
+    DebugPrintToken("IN_TUNING",1);
+   //MIDI.sendNoteOn(42, 127, 1);
+    return;}
+  else if ((PWM_Note_Settings[noteindexes[0]][12] == 0) || (PWM_Note_Settings[noteindexes[1]][13] == 0))
+  { DebugPrintToken("NOT_YET_TUNED",1);
+    DebugPrint("TUNE STATUS VCO0", double(PWM_Note_Settings[noteindexes[0]][12]),4);
+    DebugPrint("TUNE STATUS VCO1", double(PWM_Note_Settings[noteindexes[1]][13]),4);
+    InTuning = true;
+  //MIDI.sendNoteOn(43, 127, 1);
+  }
+  else
+  {
+    //MIDI.sendNoteOn(44, 127, 1);
+    DebugPrintToken("ALREADY_TUNED",1);
+    if (cents_detune[0] == 0)
+      {notefreqs[0] = notes_freq[noteindexes[0]];}
+    else
+      {notefreqs[0] = exp(cents_detune[0]*log(2)/1200 + log(notes_freq[noteindexes[0]]));}
+    
+    if (cents_detune[1] == 0)
+      {notefreqs[1] = notes_freq[noteindexes[1]];}
+    else
+      {notefreqs[1] = exp(cents_detune[1]*log(2)/1200 + log(notes_freq[noteindexes[1]]));}
+    
+    inv_gate_period_micros = (1.0/(2.0*notefreqs[0]))*1E6;
+
+    for(i=0;i<6;i++)
+    {
+      midi_to_pot_G[i] = PWM_Note_Settings[noteindexes[0]][i];
+      midi_to_pot_G[i+6] = PWM_Note_Settings[noteindexes[1]][i+6];
+      
+    }
+    
+    ChangeNote(midi_to_pot_G, midi_to_pot, pots, true, 0); // Change note for VCO 0 (subosc 0&1)
+    ChangeNote(midi_to_pot_G, midi_to_pot, pots, true, 1); // Change note for VCO 1 (subosc 2&3)
+    DebugPrint("DAC0",double(PWM_DAC_Settings[noteindexes[0]][0]),2);
+    DebugPrintStr("\n",2);
+    DebugPrint("DAC1",double(PWM_DAC_Settings[noteindexes[0]][1]),2);
+    DebugPrintStr("\n",2);
+    DebugPrint("DAC2",double(PWM_DAC_Settings[noteindexes[1]][2]),2);
+    DebugPrintStr("\n",2);
+    DebugPrint("DAC3",double(PWM_DAC_Settings[noteindexes[1]][3]),2);
+    DebugPrintStr("\n",2);
+    
+    
+    Set_DAC(PWM_DAC_Settings[noteindexes[0]][0],0);
+    Set_DAC(PWM_DAC_Settings[noteindexes[0]][1],1);
+    Set_DAC(PWM_DAC_Settings[noteindexes[1]][2],2);
+    Set_DAC(PWM_DAC_Settings[noteindexes[1]][3],3);
+    
+    if (!InitialTune)
+    {
+      if (duty[0] <= 0.5) {order[0] = true;} else {order[0] = false;}
+      if (duty[1] <= 0.5) {order[1] = true;} else {order[1] = false;}
+
+      double f_errors[2][2] = { {0.0,0.0} ,{0.0,0.0} };
+      
+
+      // TO DO : make calculations of offsets external and pass offset[2]
+      //void Enable_PWM_Mod_by_LFO(uint8_t Action, double &PWMDepth, double DutyCenterVal, double LFOFreq, float notefreq, double errors[2][2], uint8_t vco, bool order) 
+      
+      //if (DAC_gain_corrected_lfo[noteindexes[1]][4] && DACoffset[noteindexes[1]][4])
+      //Enable_PWM_Mod_by_LFO(1,PWMDepth[0],PWM_Real_Duty[noteindexes[0]][0],LFOFreq[0],notefreqs[0],0,order[0]);
+      for (i=0;i<2;i++)
+      {
+        if ((DAC_gain_corrected_lfo[noteindexes[i]][2+i] == 0.0) && (DACoffset[noteindexes[i]][2+i] == 0.0))
+        {
+          Enable_PWM_Mod_by_LFO(13,PWMDepth[i],PWM_Real_Duty[noteindexes[i]][i],LFOFreq[i],notefreqs[i],i,order[i]);
+        }
+        else
+        {
+          Enable_PWM_Mod_by_LFO(1,PWMDepth[i],PWM_Real_Duty[noteindexes[i]][i],LFOFreq[i],notefreqs[i],i,order[i]);
+          totalerrorsamples[i] = 0;  
+        }
+      }
+    }
+
+    /*
+    Serial1.print("S");
+    Serial1.print(String(float(noteindex),3));
+    Serial1.print("Z");
+    Serial1.flush();
+    */
+    //pot12.decrease(30);
+    digitalWrite(gatepin, HIGH);
+    return;
+  }
+  //MIDI.sendNoteOn(45, 127, 1);
+  
+  // TO DO :manage both suboscs.
+  
+  if ((ADSR_DAC_State[0] != ADSR_Disable) && (ADSR_DAC_State[0] != ADSR_Disabled))
+  {
+    ADSR_DAC_State[0] = ADSR_AttackInit;
+  }
+
+  if ((ADSR_DAC_State[1] != ADSR_Disable) && (ADSR_DAC_State[1] != ADSR_Disabled))
+  {
+    ADSR_DAC_State[1] = ADSR_AttackInit;
+  }
+  
+  //pot12.decrease(30);
+  //notefreqs[0] = double(pgm_read_float(&(notes_freq[noteindex])));
+  //notefreqs[1] = double(pgm_read_float(&(notes_freq[osc2noteindex])));
+  
+  if (cents_detune[0] == 0)
+    {notefreqs[0] = notes_freq[noteindexes[0]];}
+  else
+    {notefreqs[0] = exp(cents_detune[0]*log(2)/1200 + log(notes_freq[noteindexes[0]]));}
+  
+  if (cents_detune[1] == 0)
+    {notefreqs[1] = notes_freq[noteindexes[1]];}
+  else
+    {notefreqs[1] = exp(cents_detune[1]*log(2)/1200 + log(notes_freq[noteindexes[1]]));}
+  
+
+  DebugPrint("NOTEFREQ0",notefreqs[0],2);
+  DebugPrint("NOTEFREQ1",notefreqs[1],2);
+  
+  // faster_tune_test
+  //MaxVcoPots(pots,midi_to_pot,0);
+  //MaxVcoPots(pots,midi_to_pot,1);
+  //MaxVcoPots(pots,midi_to_pot,2);
+  //MaxVcoPots(pots,midi_to_pot,3);
+  
+  //MIDI.sendNoteOn(46, 127, 1);
+  
+
+  // Tune OSCs sequentially.
+  for (i=0;i<2;i++)
+  {
+    // Set pots for coarse tuning and set both DACs to half deflection setpoint (2047) 
+    if (PWM_Note_Settings[noteindexes[i]][12 + i] == 1) 
+      { 
+        DebugPrint("ALREADY TUNED VCO:",double(i),5);
+        continue;
+      }
+
+    DebugPrint("TUNE VCO:",double(i),5);
+    DebugPrint("BEFORE ARB FREQ:",double(i),5);
+    //CountFrequencyDelta2(10,notefreqs[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+       
+    GenerateArbitraryFreqDAC(midi_to_pot,notefreqs[i], duty[i], f1, f2, i); // O is for VCO 0 (not subvco)
+    
+    DebugPrint("AFTER ARB FREQ:",double(i),5);
+    //CountFrequencyDelta2(10,notefreqs[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+    
+    //MIDI.sendNoteOn(47, 127, 1);
+  
+    //MIDI.sendNoteOn(47, 127, 1);
+
+    // f1 = high , f2 = low
+    /*
+    if ((f1 == minfreq) || (f1 == maxfreq))
+    {
+
+       DebugPrintStr("TUNE CASE 1:",2);
+    
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreqs[i],duty,f1,1,2*i,0);
+        //MIDI.sendNoteOn(48, 127, 1);
+  
+        //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreqs[i],duty,f2,0,2*i + 1,1);
+        //MIDI.sendNoteOn(49, 127, 1);
+  
+        //TO DO : split tuning for both VCO in a loop
+        CountFrequencyDelta2(10,notefreqs[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        //CountFrequencyDeltaGlobal(50,notefreq,f_err);
+        //MIDI.sendNoteOn(50, 127, 1);
+  
+    }
+    */
+    /*
+    else if ((f2 == minfreq) || (f2 == maxfreq))
+    {
+
+
+        DebugPrintStr("TUNE CASE 2:",2);
+    
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreqs[i],duty,f2,1,2*i,0);
+        //MIDI.sendNoteOn(51, 127, 1);
+  
+        //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreqs[i],duty,f1,0,2*i + 1,1);
+        //MIDI.sendNoteOn(52, 127, 1);
+  
+        CountFrequencyDelta2(10,notefreqs[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        //MIDI.sendNoteOn(53, 127, 1);
+  
+    }
+    */
+    if (f1 <= f2)
+    {
+
+
+        DebugPrintStr("TUNE CASE 3:",2);
+    
+        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreqs[i],duty,f2,1,2*i,0);
+        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreqs[i],duty[i],f1,f2,i,0);
+
+        DebugPrint("REAL_DUTY", PWM_Real_Duty[noteindexes[i]][i], 2);
+        DebugPrintStr("\n",2);
+
+        //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreqs[i],duty,f1,0,2*i + 1,1);
+        
+        //CountFrequencyDelta2(10,notefreqs[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        
+    }
+    else if (f1 > f2)
+    {
+
+        // when duty < 0.5
+        DebugPrintStr("TUNE CASE 4:\n",2);
+        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreqs[i],duty,f1,1,2*i,0);
+        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreqs[i],duty[i],f1,f2,i,1);
+
+        DebugPrint("REAL_DUTY", PWM_Real_Duty[noteindexes[i]][i], 2);
+        DebugPrintStr("\n",2);
+
+        //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
+        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreqs[i],duty,f2,0,2*i + 1,1);
+        
+        //CountFrequencyDelta2(10,notefreqs[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
+        
+    }
+
+  PWM_Note_Settings[noteindexes[i]][12 + i] = 1;
+  //DebugPrint("TUNE WRITE STATUS VCO", double(PWM_Note_Settings[noteindexes[i]][12 +i]),4);
+  
+  } // end tune OSC sequentially
+
+  //PWM_Note_Settings[noteindexes[0]][12] = 1;
+  //DebugPrint("TUNE STATUS VCO0", double(PWM_Note_Settings[noteindexes[0]][12]),4);
+  //DebugPrint("TUNE STATUS VCO1", double(PWM_Note_Settings[noteindexes[1]][13]),4);
+
+
+  InTuning = false;
+  digitalWrite(gatepin, HIGH);
+ 
+  //MIDI.sendNoteOn(60, 127, 1);
+  
+} // End handleNoteOn
+
+void handleNoteOff(byte channel, byte pitch, byte velocity) {
+
+  // Disable VCA Gate
+  DebugPrintToken("NOTE_OFF",2);
+  digitalWrite(gatepin, LOW);
+
+
+  if ((ADSR_DAC_State[0] != ADSR_Disable) && (ADSR_DAC_State[0] != ADSR_Disabled))
+  {
+    ADSR_DAC_State[0] = ADSR_ReleaseInit;
+    DebugPrint("to_ADSR_RELEASE_INIT",double(0),2);
+  }
+
+  if ((ADSR_DAC_State[1] != ADSR_Disable) && (ADSR_DAC_State[1] != ADSR_Disabled))
+  {
+    DebugPrint("to_ADSR_RELEASE_INIT",double(1),2);
+    ADSR_DAC_State[1] = ADSR_ReleaseInit;
+  }
+ 
+  //pot12.increase(30);
+} // end handleNoteOff
+
+void TuneAll()
+{
+  InitialTune = true;
+  uint8_t k;
+
+  for (k = 0;k < 49;k++)
+  {
+    // reset tuned flag for all notes.
+    PWM_Note_Settings[k][12] = 0;
+    PWM_Note_Settings[k][13] = 0;
+    handleNoteOn(0,k+48,127);
+    delay(100);
+    handleNoteOff(0,k+48,127);
+  }
+
+  InitialTune = false;
+  PrintDACGainAdaptive(4);
+
+} // end TuneAll
 
 void handleControlChange(byte channel, byte ccnum, byte val)
 {
@@ -2498,6 +3019,10 @@ void handleControlChange(byte channel, byte ccnum, byte val)
       }
       cur_mix2 = mix2;
       break;
+    
+    case 84:
+      TuneAll();
+      break;
 
     case 82:
 
@@ -2508,315 +3033,19 @@ void handleControlChange(byte channel, byte ccnum, byte val)
 
       cents_detune[1] = val - 64;
       break;
-    
+
+    case 85:
+      
+      //duty[0] = val/128;
+      break;
+
+    case 86:
+  
+      //duty[1] = val/128;
+      break;
+
   } // end switch case ccnum
 } // end handleControlChange
-
-void handleNoteOn(byte channel, byte pitch, byte velocity)
-{
-  double f1 = 0.0;
-  double f2 = 0.0;
-  double f_meas = 0.0;
-  double f1_meas = 0.0;
-  double f2_meas = 0.0;
-  double f_err = 0.0;
-
-  bool order[2] = {0,0};
-  double duty[2] = {0.48,0.48};
-  double real_duty[2] = {0.0,0.0};
-  double LFOFreq[2] = {0.2,0.2};
-  float PWMDepth = 0.06;
-  double notefreq[2];
-  double osc2notefreq;
-  uint8_t i;
-  uint8_t noteindexes[2];
-  uint8_t midi_to_pot_G[12];
-
-  //MIDI.sendNoteOn(40, 127, 1);
-  //osc2noteshift = 0;
-
-  // restrict OSC to notes of possible frequency range
-  if (pitch < 48) {
-    noteindexes[0] = 0;
-    }
-  else if (pitch > 96) {
-    noteindexes[0] = 48;
-  }
-  else {
-    noteindexes[0] = pitch - 48;
-  }
-
-  noteindexes[1] = noteindexes[0] + osc2noteshift;
-  noteindexes[1] = constrain(noteindexes[1],0,48);
-  if (noteindexes[0] != (noteindexes[1] - osc2noteshift)) { noteindexes[1] = noteindexes[0];}
-
-  //MIDI.sendNoteOn(41, 127, 1);
-   
-  if (InTuning)  {
-    DebugPrintToken("IN_TUNING",1);
-   //MIDI.sendNoteOn(42, 127, 1);
-    return;}
-  else if ((PWM_Note_Settings[noteindexes[0]][12] == 0) || (PWM_Note_Settings[noteindexes[1]][13] == 0))
-  { DebugPrintToken("NOT_YET_TUNED",1);
-    DebugPrint("TUNE STATUS VCO0", double(PWM_Note_Settings[noteindexes[0]][12]),4);
-    DebugPrint("TUNE STATUS VCO1", double(PWM_Note_Settings[noteindexes[1]][13]),4);
-    InTuning = true;
-  //MIDI.sendNoteOn(43, 127, 1);
-  }
-  else
-  {
-    //MIDI.sendNoteOn(44, 127, 1);
-    DebugPrintToken("ALREADY_TUNED",1);
-    if (cents_detune[0] == 0)
-      {notefreq[0] = notes_freq[noteindexes[0]];}
-    else
-      {notefreq[0] = exp(cents_detune[0]*log(2)/1200 + log(notes_freq[noteindexes[0]]));}
-    
-    if (cents_detune[1] == 0)
-      {notefreq[1] = notes_freq[noteindexes[1]];}
-    else
-      {notefreq[1] = exp(cents_detune[1]*log(2)/1200 + log(notes_freq[noteindexes[1]]));}
-    
-    inv_gate_period_micros = (1.0/(2.0*notefreq[0]))*1E6;
-
-    for(i=0;i<6;i++)
-    {
-      midi_to_pot_G[i] = PWM_Note_Settings[noteindexes[0]][i];
-      midi_to_pot_G[i+6] = PWM_Note_Settings[noteindexes[1]][i+6];
-      
-    }
-    
-    ChangeNote(midi_to_pot_G, midi_to_pot, pots, true, 0); // Change note for VCO 0 (subosc 0&1)
-    ChangeNote(midi_to_pot_G, midi_to_pot, pots, true, 1); // Change note for VCO 1 (subosc 2&3)
-    DebugPrint("DAC0",double(PWM_DAC_Settings[noteindexes[0]][0]),2);
-    DebugPrintStr("\n",2);
-    DebugPrint("DAC1",double(PWM_DAC_Settings[noteindexes[0]][1]),2);
-    DebugPrintStr("\n",2);
-    DebugPrint("DAC2",double(PWM_DAC_Settings[noteindexes[1]][2]),2);
-    DebugPrintStr("\n",2);
-    DebugPrint("DAC3",double(PWM_DAC_Settings[noteindexes[1]][3]),2);
-    DebugPrintStr("\n",2);
-    
-    
-    Set_DAC(PWM_DAC_Settings[noteindexes[0]][0],0);
-    Set_DAC(PWM_DAC_Settings[noteindexes[0]][1],1);
-    Set_DAC(PWM_DAC_Settings[noteindexes[1]][2],2);
-    Set_DAC(PWM_DAC_Settings[noteindexes[1]][3],3);
-    
-    if (!InitialTune)
-    {
-      if (duty[0] <= 0.5) {order[0] = false;} else {order[0] = true;}
-      if (duty[1] <= 0.5) {order[1] = false;} else {order[1] = true;}
-      
-      Enable_PWM_Mod_by_LFO(PWMDepth,PWM_Real_Duty[noteindexes[0]][0],LFOFreq[0],notefreq[0],0,order[0]);
-      Enable_PWM_Mod_by_LFO(PWMDepth,PWM_Real_Duty[noteindexes[1]][1],LFOFreq[1],notefreq[1],1,order[1]);
-    }
-
-    /*
-    Serial1.print("S");
-    Serial1.print(String(float(noteindex),3));
-    Serial1.print("Z");
-    Serial1.flush();
-    */
-    //pot12.decrease(30);
-    digitalWrite(gatepin, HIGH);
-    return;
-  }
-  //MIDI.sendNoteOn(45, 127, 1);
-  
-  // TO DO :manage both suboscs.
-  
-  if ((ADSR_DAC_State[0] != ADSR_Disable) && (ADSR_DAC_State[0] != ADSR_Disabled))
-  {
-    ADSR_DAC_State[0] = ADSR_AttackInit;
-  }
-
-  if ((ADSR_DAC_State[1] != ADSR_Disable) && (ADSR_DAC_State[1] != ADSR_Disabled))
-  {
-    ADSR_DAC_State[1] = ADSR_AttackInit;
-  }
-  
-  //pot12.decrease(30);
-  //notefreq[0] = double(pgm_read_float(&(notes_freq[noteindex])));
-  //notefreq[1] = double(pgm_read_float(&(notes_freq[osc2noteindex])));
-  
-  if (cents_detune[0] == 0)
-    {notefreq[0] = notes_freq[noteindexes[0]];}
-  else
-    {notefreq[0] = exp(cents_detune[0]*log(2)/1200 + log(notes_freq[noteindexes[0]]));}
-  
-  if (cents_detune[1] == 0)
-    {notefreq[1] = notes_freq[noteindexes[1]];}
-  else
-    {notefreq[1] = exp(cents_detune[1]*log(2)/1200 + log(notes_freq[noteindexes[1]]));}
-  
-
-  DebugPrint("NOTEFREQ0",notefreq[0],2);
-  DebugPrint("NOTEFREQ1",notefreq[1],2);
-  
-  // faster_tune_test
-  //MaxVcoPots(pots,midi_to_pot,0);
-  //MaxVcoPots(pots,midi_to_pot,1);
-  //MaxVcoPots(pots,midi_to_pot,2);
-  //MaxVcoPots(pots,midi_to_pot,3);
-  
-  //MIDI.sendNoteOn(46, 127, 1);
-  
-
-  // Tune OSCs sequentially.
-  for (i=0;i<2;i++)
-  {
-    // Set pots for coarse tuning and set both DACs to half deflection setpoint (2047) 
-    if (PWM_Note_Settings[noteindexes[i]][12 + i] == 1) 
-      { 
-        DebugPrint("ALREADY TUNED VCO:",double(i),5);
-        continue;
-      }
-
-    DebugPrint("TUNE VCO:",double(i),5);
-    DebugPrint("BEFORE ARB FREQ:",double(i),5);
-    //CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
-       
-    GenerateArbitraryFreqDAC(midi_to_pot,notefreq[i], duty[i], f1, f2, i); // O is for VCO 0 (not subvco)
-    
-    DebugPrint("AFTER ARB FREQ:",double(i),5);
-    //CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
-    
-    //MIDI.sendNoteOn(47, 127, 1);
-  
-    //MIDI.sendNoteOn(47, 127, 1);
-
-    // f1 = high , f2 = low
-    /*
-    if ((f1 == minfreq) || (f1 == maxfreq))
-    {
-
-       DebugPrintStr("TUNE CASE 1:",2);
-    
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f1,1,2*i,0);
-        //MIDI.sendNoteOn(48, 127, 1);
-  
-        //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f2,0,2*i + 1,1);
-        //MIDI.sendNoteOn(49, 127, 1);
-  
-        //TO DO : split tuning for both VCO in a loop
-        CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
-        //CountFrequencyDeltaGlobal(50,notefreq,f_err);
-        //MIDI.sendNoteOn(50, 127, 1);
-  
-    }
-    */
-    /*
-    else if ((f2 == minfreq) || (f2 == maxfreq))
-    {
-
-
-        DebugPrintStr("TUNE CASE 2:",2);
-    
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f2,1,2*i,0);
-        //MIDI.sendNoteOn(51, 127, 1);
-  
-        //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        NewAutoTuneDAC(pots,midi_to_pot,noteindex,notefreq[i],duty,f1,0,2*i + 1,1);
-        //MIDI.sendNoteOn(52, 127, 1);
-  
-        CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
-        //MIDI.sendNoteOn(53, 127, 1);
-  
-    }
-    */
-    if (f1 <= f2)
-    {
-
-
-        DebugPrintStr("TUNE CASE 3:",2);
-    
-        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f2,1,2*i,0);
-        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreq[i],duty[i],f1,f2,i,0);
-
-        DebugPrint("REAL_DUTY", PWM_Real_Duty[noteindexes[i]][i], 2);
-        DebugPrintStr("\n",2);
-
-        //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,0,2*i + 1,1);
-        
-        //CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
-        
-    }
-    else if (f1 > f2)
-    {
-
-        // when duty < 0.5
-        DebugPrintStr("TUNE CASE 4:\n",2);
-        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f1,1,2*i,0);
-        NewAutoTuneDAC2(pots,midi_to_pot,noteindexes[i],notefreq[i],duty[i],f1,f2,i,1);
-
-        DebugPrint("REAL_DUTY", PWM_Real_Duty[noteindexes[i]][i], 2);
-        DebugPrintStr("\n",2);
-
-        //CountFrequencyDelta2(50,notefreq,f1,f2,f_meas,f1_meas,f2_meas,f_err);
-        //NewAutoTuneDAC(pots,midi_to_pot,noteindexes[i],notefreq[i],duty,f2,0,2*i + 1,1);
-        
-        //CountFrequencyDelta2(10,notefreq[i],f1,f2,f_meas,f1_meas,f2_meas,f_err,i);
-        
-    }
-
-  PWM_Note_Settings[noteindexes[i]][12 + i] = 1;
-  //DebugPrint("TUNE WRITE STATUS VCO", double(PWM_Note_Settings[noteindexes[i]][12 +i]),4);
-  
-  } // end tune OSC sequentially
-
-  //PWM_Note_Settings[noteindexes[0]][12] = 1;
-  //DebugPrint("TUNE STATUS VCO0", double(PWM_Note_Settings[noteindexes[0]][12]),4);
-  //DebugPrint("TUNE STATUS VCO1", double(PWM_Note_Settings[noteindexes[1]][13]),4);
-
-
-  InTuning = false;
-  digitalWrite(gatepin, HIGH);
- 
-  //MIDI.sendNoteOn(60, 127, 1);
-  
-}
-
-
-void handleNoteOff(byte channel, byte pitch, byte velocity) {
-
-  // Disable VCA Gate
-  DebugPrintToken("NOTE_OFF",2);
-  digitalWrite(gatepin, LOW);
-
-
-  if ((ADSR_DAC_State[0] != ADSR_Disable) && (ADSR_DAC_State[0] != ADSR_Disabled))
-  {
-    ADSR_DAC_State[0] = ADSR_ReleaseInit;
-    DebugPrint("to_ADSR_RELEASE_INIT",double(0),2);
-  }
-
-  if ((ADSR_DAC_State[1] != ADSR_Disable) && (ADSR_DAC_State[1] != ADSR_Disabled))
-  {
-    DebugPrint("to_ADSR_RELEASE_INIT",double(1),2);
-    ADSR_DAC_State[1] = ADSR_ReleaseInit;
-  }
- 
-  //pot12.increase(30);
-}
-
-void TuneAll()
-
-{
-  uint8_t k;
-
-  for (k = 0;k < 49;k++)
-  {
-    handleNoteOn(0,k+48,127);
-    delay(200);
-    handleNoteOff(0,k+48,127);
-  }
-
-  InitialTune = false;
-
-}
 
 void WriteEEPROMCoarsePotStepFrequencies(DigiPot *ptr[12], byte (&curr_pot_vals)[12], uint8_t subvco)
 {
@@ -3132,7 +3361,7 @@ return integrator;
 void setup() 
 {
 
-
+  double notefreq;
   char charspeed[16] = "<SERIAL 9600>";
   char charfreq[8];
   char printcharfreq[10];
@@ -3236,7 +3465,7 @@ void setup()
   DAC_gain[2] = -9.116;
   DAC_gain[3] = -9.1385;
 */  
-
+  
 
   DAC_gain[0] = -9.10277;
   DAC_gain[1] = -9.10866;
@@ -3313,6 +3542,12 @@ void setup()
     for(n=0;n<14;n++)
     {
       PWM_Note_Settings[k][n] = 0;
+    }
+
+    for(n=0;n<4;n++)
+    {
+      DACoffset[k][n] = 0.0;
+      DAC_gain_corrected_lfo[k][n] = 0.0;
     }    
   }
   
@@ -3716,9 +3951,9 @@ void setup()
 
     if (checkPWM_LFO)
     {
-      float PWMDepth = 0.1;
-      Enable_PWM_Mod_by_LFO(PWMDepth,0.5,0.1,notefreq,0,0);
-      Enable_PWM_Mod_by_LFO(PWMDepth,0.5,0.1,notefreq,1,0);
+      //float PWMDepth = 0.1;
+      //Enable_PWM_Mod_by_LFO(false,PWMDepth[0],0.5,0.1,notefreq,f_errors,0,false);
+      //Enable_PWM_Mod_by_LFO(false,PWMDepth[1],0.5,0.1,notefreq,f_errors,1,false);
       
       //int i;
       /*
@@ -3876,9 +4111,24 @@ void setup()
 
 // flip the pin #0 up and down
 
-void loop() {
+void loop() 
+{
   
+  // LFO freq errors at both extremes of PWM
+  static double fhe1[2] = {0.0,0.0};
+  static double fhe2[2] = {0.0,0.0};
+  static double fle1[2] = {0.0,0.0};
+  static double fle2[2] = {0.0,0.0};
+  static double f_errors[4][2] = {{0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}};
+  static double f_offset[4] = {0.0,0.0,0.0,0.0};
+  
+  // temporary, put as global.
+  
+  //static bool DACGainAdjusted = false;
+  //static bool OffsetAdjusted = false;
+
   //delay(10);
+  double notefreq;
   static long currentsample = 0;
   static long prevsample = 0;
   static long ADSR_currentsample[2] = {0,0};
@@ -4043,25 +4293,251 @@ void loop() {
         } // end switch ADSR_states
       } // end ADSR loop
     } // end if !Gate_DAC
-      
+
+     
     if (PWMActive)
     {
-    // PWM mode free running. (do not update DAC state needlessly)
-    // to do : LFO 'handlenoteon' trigger mode.
-    //currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
-    currentsample = long(micros()*inv_sample_inc_micros + 0.5);
-    if(currentsample != prevsample)
-    {
+      // PWM mode free running. (do not update DAC state needlessly)
+      // to do : LFO 'handlenoteon' trigger mode.
+      //currentsample = long(timer2.get_micros()*inv_sample_inc_micros + 0.5);
+      double fm[2] = {0.0,0.0};
+      double fhm[2] = {0.0,0.0};
+      double flm[2] = {0.0,0.0};
+      double fe[2] = {0.0,0.0};
+      double lftmh[2] = {0.0,0.0};
+      double lftml[2] = {0.0,0.0};
+      uint8_t i;
+
+      bool order[2] = {false,false};
+
+      if (duty[0] <= 0.5) {order[0] = false;} else {order[0] = true;}
+      if (duty[1] <= 0.5) {order[1] = false;} else {order[1] = true;}
+
+      currentsample = long(micros()*inv_sample_inc_micros + 0.5);
       
+      if(currentsample != prevsample)
+      {
+
         Set_DAC(DAC_table[0][currentsample % 360],0);
         Set_DAC(DAC_table[1][currentsample % 360],1);
         Set_DAC(DAC_table[2][currentsample % 360],2);
         Set_DAC(DAC_table[3][currentsample % 360],3);
     
-    }
+        for(i=0;i<2;i++)
+        {
+        
+          if (currentsample % 360 == 89)
+          {
+            //for(i=0;i<2;i++)
+            //{
+              DebugPrint(" HIGH DAC - VCO:\n",double(i),2);
+            
+              CountFrequencyDelta2(100,notefreqs[0],LFO_MinMax_Freq_Targets[2*i + order[i]][1],LFO_MinMax_Freq_Targets[2*i + !order[i]][1],fm[i],fhm[i],flm[i],fe[i],i);
+              //CountFrequencyDelta2(100,notefreqs[1],LFO_MinMax_Freq_Targets[2 + order[1]][1],LFO_MinMax_Freq_Targets[2 + !order[1]][1],fm[1],fhm[1],flm[1],fe[1],1);
+              
+              lftmh[i] = LFO_MinMax_Freq_Targets[2 + order[i]][1];
+              lftml[i] = LFO_MinMax_Freq_Targets[2 + !order[i]][1];
+              fhe1[i] = fhm[i] - lftmh[i];
+              fle1[i] = flm[i] - lftml[i];
+              f_errors[2*i][1] = fhe1[i];
+              f_errors[2*i +1][1] = fle1[i];
+              
+              DebugPrintStr("HIGH DAC WATERMARK:\n",2);
+              DebugPrint("HIGH_STATE_MEAS:", fhm[i], 2);
+              DebugPrint("LOW_STATE_MEAS:", flm[i], 2);
+              DebugPrintStr("\n",2);
+              DebugPrint("HIGH_STATE_TRG:", lftmh[i],2);
+              DebugPrint("LOW_STATE_TRG:", lftml[i],2);
+              DebugPrintStr("\n",2);
+              DebugPrint("HIGH_STATE_ERR:", fhe1[i], 2);
+              DebugPrint("LOW_STATE_ERR:", fle1[i], 2);
+              DebugPrintStr("\n",2);
+              totalerrorsamples[i]++;
+          
+            //} // end for(i=0;i<2;i++) - vco select
+            
+            //DAC_gain_corrected = (prev_delta_freq * DAC_gain[subvco])/(prev_delta_freq - delta_freq);
+          }  // if (currentsample % 360 == 89)
+          else if (currentsample % 360 == 269)
+          {
+            // this loop works only if both lfos have same phase and freq....
+            //for(i=0;i<2;i++)
+            //{
+                  
+              DebugPrint("LOW DAC - VCO:\n",double(i),2);  
+              CountFrequencyDelta2(100,notefreqs[i],LFO_MinMax_Freq_Targets[2*i + order[i]][0],LFO_MinMax_Freq_Targets[2*i + !order[i]][0],fm[i],fhm[i],flm[i],fe[i],i);
+              lftmh[i] = LFO_MinMax_Freq_Targets[2*i + order[i]][0];
+              lftml[i] = LFO_MinMax_Freq_Targets[2*i + !order[i]][0];
+              fhe2[i] = fhm[i] - lftmh[i];
+              fle2[i] = flm[i] - lftml[i];
+              f_errors[2*i][0] = fhe2[i];
+              f_errors[2*i + 1][0] = fle2[i];
+              
+            
+              DebugPrint("TOT_ERR_SAMPLES:", double(totalerrorsamples[i]),2);
+              DebugPrintStr("\nLOW DAC WATERMARK:\n",2);
+              DebugPrint("HIGH_STATE_MEAS:", fhm[i], 2);
+              DebugPrint("LOW_STATE_MEAS:", flm[i], 2);
+              DebugPrintStr("\n",2);
+              DebugPrint("HIGH_STATE_TRG:", lftmh[i], 2);
+              DebugPrint("LOW_STATE_TRG:", lftml[i], 2);
+              DebugPrintStr("\n",2);
 
-    prevsample = currentsample;
-    }
+              DebugPrint("HIGH_STATE_ERR:", fhe2[i], 2);
+              DebugPrint("LOW_STATE_ERR:", fle2[i], 2);
+              DebugPrintStr("\n",2);
+              
+              totalerrorsamples[i]++;
+            
+            //} //end for i....
+            
+            //for(i=0;i<2;i++)
+            //{
+            
+              //test only....
+
+              //f_errors[subvco for given vco][low/high_pwm_trip]
+              DebugPrint("\nOFFSET SECTION - VCO:\n",double(i),2);  
+              
+              //Enable_PWM_Mod_by_LFO(true,PWMDepth[0],duty[0],LFOFreq[0],notefreqs[0],f_errors,0,true);
+              DebugPrint("\nTOTALSAMPLES0:", totalerrorsamples[0], 2);
+              DebugPrint("\nTOTALSAMPLES1:", totalerrorsamples[1], 2);
+              DebugPrint("\nDACOFFSETSET0:", DACoffset[noteindexes[0]][2], 2);
+              DebugPrint("\nDACOFFSETSET1:", DACoffset[noteindexes[1]][3], 2);
+
+
+              if ((totalerrorsamples[i] >= 2) && (DACoffset[noteindexes[i]][2+i] == 0))
+              {
+
+                if ((f_errors[2*i + !order[i]][1] != 0.0) && (f_errors[2*i + !order[i]][0] != 0.0))
+                  {
+                    f_offset[2*i] = (f_errors[2*i + !order[i]][1] + f_errors[2*i + !order[i]][0])/2;
+                    DACoffset[noteindexes[i]][!order[i]] = int(f_offset[2*i]*-DAC_gain[2*i + !order[i]]);
+                    DebugPrint("f_errors[!order][1]", f_errors[2*i + !order[i]][1],2);
+                    DebugPrint("f_offset[!order][0]", f_errors[2*i + !order[i]][0],2);
+            
+                  }
+
+                  if ((f_errors[2*i + order[i]][1] != 0.0) && (f_errors[2*i + order[i]][0] != 0.0))
+                  {
+                    f_offset[2*i +1] = (f_errors[2*i + order[i]][1] + f_errors[2*i + order[i]][0])/2;
+                    DACoffset[noteindexes[i]][order[i]] = int(f_offset[2*i + 1]*-DAC_gain[2*i + order[1]]);
+                  
+                    // errors[1][1] et errors[0][0]
+                    DebugPrint("f_errors[order][1]", f_errors[2*i + order[i]][1],1);
+                    DebugPrint("f_offset[order][0]", f_errors[2*i + order[i]][0],1);
+            
+                  }    
+        
+                Enable_PWM_Mod_by_LFO(6,PWMDepth[i],duty[i],LFOFreq[i],notefreqs[i],i,true);
+
+                DebugPrint("\nDACoffset[noteindexes[0]][2]",DACoffset[noteindexes[0]][2],2);
+                DebugPrint("\nDAC_gain_corrected_lfo[noteindexes[1]][2]",DAC_gain_corrected_lfo[noteindexes[0]][2],2);
+
+                DebugPrint("\nDACoffset[noteindexes[1]][3]",DACoffset[noteindexes[1]][3],2);
+                DebugPrint("\nDAC_gain_corrected_lfo[noteindexes[1]][2]",DAC_gain_corrected_lfo[noteindexes[1]][3],2);
+
+
+
+                DebugPrint("DAC OFFSET SET!\n",double(i),2);
+                DACoffset[noteindexes[i]][2 + i] = 1.0;
+                
+
+
+                DebugPrint("\nDACoffset[noteindexes[0]][2]",DACoffset[noteindexes[0]][2],2);
+                DebugPrint("\nDAC_gain_corrected_lfo[noteindexes[1]][2]",DAC_gain_corrected_lfo[noteindexes[0]][2],2);
+
+                DebugPrint("\nDACoffset[noteindexes[1]][2]",DACoffset[noteindexes[1]][3],2);
+                DebugPrint("\nDAC_gain_corrected_lfo[noteindexes[1]][2]",DAC_gain_corrected_lfo[noteindexes[1]][3],2);
+
+                //OffsetAdjusted = true;
+                //totalcorrections++;
+              } // end if totalerrorsamples > 2 && ....
+            //} // end for i....
+
+
+            //for(i=0;i<2;i++)
+            //{
+              if ((totalerrorsamples[i] >= 4) && (DACoffset[noteindexes[i]][2+i] == 1) && (DAC_gain_corrected_lfo[noteindexes[i]][2+i] == 0))
+              {
+                double prev_errors[4];
+                double current_errors[4];
+                double DAC_gain_corrected_lfo_tmp[8];
+                    // these are previous values
+                prev_errors[0] = LFO_Delta_Freq_Targets[2*i + order[i]][1];
+                prev_errors[1] = LFO_Delta_Freq_Targets[2*i + !order[i]][1];
+                prev_errors[2] = LFO_Delta_Freq_Targets[2*i + order[i]][0];
+                prev_errors[3] = LFO_Delta_Freq_Targets[2*i + !order[i]][0];
+                  
+                DebugPrint("\nprev_errors[0]", prev_errors[0],2);
+                DebugPrint("\nprev_errors[1]", prev_errors[1],2);
+                DebugPrint("\nprev_errors[2]", prev_errors[2],2);
+                DebugPrint("\nprev_errors[3]", prev_errors[3],2);
+                
+                  
+                // these are new values
+                current_errors[0] = prev_errors[0] + fhe1[i];
+                current_errors[1] = prev_errors[1] + fle1[i];
+                current_errors[2] = prev_errors[2] + fhe1[i];
+                current_errors[3] = prev_errors[3] + fle1[i];
+
+                DebugPrint("\ncurrent_errors[0]", current_errors[0],2);
+                DebugPrint("\ncurrent_errors[1]", current_errors[1],2);
+                DebugPrint("\ncurrent_errors[2]", current_errors[2],2);
+                DebugPrint("\ncurrent_errors[3]", current_errors[3],2);
+                  
+                if (current_errors[0] > 0) {DAC_gain_corrected_lfo_tmp[0] = (prev_errors[0] * DAC_gain[2*i + order[i]])/current_errors[0];}
+                else {DAC_gain_corrected_lfo_tmp[0] = (current_errors[0] * DAC_gain[2*i + order[i]])/prev_errors[0];} 
+                
+                if (current_errors[1] > 0) {DAC_gain_corrected_lfo_tmp[1] = (prev_errors[1] * DAC_gain[2*i+ !order[i]])/current_errors[1];}
+                else {DAC_gain_corrected_lfo_tmp[1] = (current_errors[1] * DAC_gain[2*i + !order[i]])/prev_errors[1];}
+                
+                if (current_errors[2] > 0) {DAC_gain_corrected_lfo_tmp[2] = (prev_errors[2] * DAC_gain[2 + order[1]])/current_errors[2];}
+                else {DAC_gain_corrected_lfo_tmp[2] = (current_errors[2] * DAC_gain[2*i + order[i]])/prev_errors[2];}
+
+                if (current_errors[3] > 0) {DAC_gain_corrected_lfo_tmp[3] = (prev_errors[3] * DAC_gain[2 + !order[1]])/current_errors[3];}
+                else {DAC_gain_corrected_lfo_tmp[3] = (current_errors[3] * DAC_gain[2*i + !order[i]])/prev_errors[3];}
+
+                DebugPrint("\nDAC_gain_corrected_lfo_tmp[0]", DAC_gain_corrected_lfo_tmp[0],2);
+                DebugPrint("\nDAC_gain_corrected_lfo_tmp[1]", DAC_gain_corrected_lfo_tmp[1],2);
+                DebugPrint("\nDAC_gain_corrected_lfo_tmp[2]", DAC_gain_corrected_lfo_tmp[2],2);
+                DebugPrint("\nDAC_gain_corrected_lfo_tmp[3]", DAC_gain_corrected_lfo_tmp[3],2);
+
+
+                // computing the gain correction (based on the average correction of both PWM high and low trips)
+                DAC_gain_corrected_lfo[noteindexes[i]][order[1]] = (DAC_gain_corrected_lfo_tmp[0] + DAC_gain_corrected_lfo_tmp[2])/2;
+                DAC_gain_corrected_lfo[noteindexes[i]][!order[1]] = (DAC_gain_corrected_lfo_tmp[1] + DAC_gain_corrected_lfo_tmp[3])/2;
+                DebugPrint("DAC_GAIN_COR1:", DAC_gain_corrected_lfo[noteindexes[i]][order[1]],2);
+                DebugPrint("DAC_GAIN_COR2:", DAC_gain_corrected_lfo[noteindexes[i]][!order[1]],2);
+
+                Enable_PWM_Mod_by_LFO(14,PWMDepth[i],duty[i],LFOFreq[i],notefreqs[i],i,true);
+                DAC_gain_corrected_lfo[noteindexes[i]][2+i] = 1;
+                DebugPrint("\nDACoffset[noteindexes[1]][4]",DACoffset[noteindexes[i]][2+i],2);
+                DebugPrint("\nDAC_gain_corrected_lfo[noteindexes[1]][4]",DAC_gain_corrected_lfo[noteindexes[i]][2+i],2);
+
+
+                totalerrorsamples[i] = 0;
+                //DACGainAdjusted = true;
+              } //if ((totalerrorsamples >= 4) && (OffsetAdjusted) && (!DACGainAdjusted))
+              
+          //} // end for i ...
+          
+            /*
+            if ((totalerrorsamples >= 8) && (OffsetAdjusted) && (DACGainAdjusted))
+            {
+
+              Enable_PWM_Mod_by_LFO(14,PWMDepth[1],duty[1],LFOFreq[1],notefreqs[0],f_errors,1,true);
+              //totalerrorsamples = 0;
+              OffsetAdjusted = false;
+              DACGainAdjusted = false;
+            }
+            */
+          
+          } //else if (currentsample % 360 == 269)
+        } // end for i.... (VCO)  
+        prevsample = currentsample;
+      } // if(currentsample != prevsample)
+    } // if (PWMActive)  
   } // end if midimode
 
   if (!midimode)
